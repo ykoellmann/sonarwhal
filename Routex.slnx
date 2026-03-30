@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Routex/src/dotnet/ReSharperPlugin.Routex.Tests/ReSharperPlugin.Routex.Tests.csproj" />
+  <Project Path="Routex/src/dotnet/ReSharperPlugin.Routex/ReSharperPlugin.Routex.csproj" />
+  <Project Path="Routex/src/dotnet/ReSharperPlugin.Routex/ReSharperPlugin.Routex.Rider.csproj" />
+</Solution>

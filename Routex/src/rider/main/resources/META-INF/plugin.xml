@@ -1,0 +1,58 @@
+<idea-plugin require-restart="true">
+  <id>com.jetbrains.rider.plugins.routex</id>
+  <name>Routex</name>
+  <version>_PLACEHOLDER_</version>
+  <vendor email="" url="">Yannik Köllmann</vendor>
+  <idea-version since-build="_PLACEHOLDER_" until-build="_PLACEHOLDER_" />
+
+  <depends>com.intellij.modules.rider</depends>
+
+  <description>
+<![CDATA[
+<p><b>Routex</b> automatically detects API endpoints from your source code and makes them testable directly inside Rider.</p>
+<ul>
+  <li>Automatic endpoint detection via PSI analysis — no build required</li>
+  <li>Live updates on file changes</li>
+  <li>Jump-to-source from any endpoint</li>
+  <li>Built-in HTTP client with request builder</li>
+  <li>Supports Controller-based and Minimal API styles (ASP.NET Core)</li>
+</ul>
+]]>
+  </description>
+
+  <!-- Extension point for language-specific endpoint providers -->
+  <extensionPoints>
+    <extensionPoint
+        name="endpointProvider"
+        qualifiedName="com.jetbrains.rider.plugins.routex.endpointProvider"
+        interface="com.routex.providers.EndpointProvider"
+        area="PROJECT"/>
+  </extensionPoints>
+
+  <extensions defaultExtensionNs="com.intellij">
+
+    <!-- Tool window shown at the bottom of Rider -->
+    <toolWindow
+        id="RouteX"
+        anchor="bottom"
+        secondary="false"
+        icon="/icons/routex.svg"
+        factoryClass="com.routex.toolwindow.RouteXToolWindowFactory"/>
+
+    <!-- Project-level service that holds the cached endpoint list -->
+    <projectService serviceImplementation="com.routex.RouteXService"/>
+
+    <!-- App-level registry for PSI-based endpoint providers -->
+    <applicationService serviceImplementation="com.routex.providers.EndpointProviderRegistry"/>
+
+    <!-- Trigger initial endpoint scan after project opens -->
+    <postStartupActivity implementation="com.routex.RouteXStartupActivity"/>
+
+  </extensions>
+
+  <!-- Register the C# endpoint provider -->
+  <extensions defaultExtensionNs="com.jetbrains.rider.plugins.routex">
+    <endpointProvider implementation="com.routex.providers.csharp.CSharpEndpointProvider"/>
+  </extensions>
+
+</idea-plugin>
