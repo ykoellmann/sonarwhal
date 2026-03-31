@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using JetBrains.DocumentModel;
 using JetBrains.ReSharper.Psi;
+using JetBrains.ReSharper.Psi.CSharp;
 using JetBrains.ReSharper.Psi.CSharp.Tree;
 using JetBrains.ReSharper.Psi.Tree;
 
@@ -68,7 +70,7 @@ namespace ReSharperPlugin.Routex
                     ControllerName = controllerName,
                     MethodName = methodDecl.DeclaredName,
                     Parameters = parameters,
-                    BodySchema = BuildBodySchema(parameters),
+                    BodySchema = BuildBodySchema(parameters, methodDecl),
                     AuthRequired = auth?.Required ?? false,
                     AuthPolicy = auth?.Policy,
                     ContentHash = contentHash,
@@ -135,9 +137,9 @@ namespace ReSharperPlugin.Routex
                     result.Add(new RoutexParameter { Name = name, ParamType = typeName, Source = RoutexParameterSource.QUERY, Required = false });
                 else if (HasParameterAttribute(param, "FromHeader"))
                     result.Add(new RoutexParameter { Name = name, ParamType = typeName, Source = RoutexParameterSource.HEADER, Required = true });
-                else if (HasParameterAttribute(param, "FromRoute") || route.Contains($"{{{name}}}"))
-                    result.Add(new RoutexParameter { Name = name, ParamType = typeName, Source = RoutexParameterSource.PATH, Required = !route.Contains($"{{{name}?}}") });
-                else if (IsSimpleType(typeName) && !route.Contains($"{{{name}}}"))
+                else if (HasParameterAttribute(param, "FromRoute") || IsInRoute(name, route))
+                    result.Add(new RoutexParameter { Name = name, ParamType = typeName, Source = RoutexParameterSource.PATH, Required = !IsOptionalInRoute(name, route) });
+                else if (IsSimpleType(typeName) && !IsInRoute(name, route))
                     result.Add(new RoutexParameter { Name = name, ParamType = typeName, Source = RoutexParameterSource.QUERY, Required = false });
                 else
                     result.Add(new RoutexParameter { Name = name, ParamType = typeName, Source = RoutexParameterSource.BODY, Required = true });
@@ -146,17 +148,93 @@ namespace ReSharperPlugin.Routex
             return result;
         }
 
-        private RoutexSchema BuildBodySchema(List<RoutexParameter> parameters)
+        private RoutexSchema BuildBodySchema(List<RoutexParameter> parameters, IMethodDeclaration methodDecl)
         {
             var body = parameters.FirstOrDefault(p => p.Source == RoutexParameterSource.BODY);
             if (body == null) return null;
 
+            var isArray = body.ParamType.StartsWith("IEnumerable<") || body.ParamType.EndsWith("[]") || body.ParamType.StartsWith("List<");
+
+            var bodyParamDecl = methodDecl.ParameterDeclarationsEnumerable
+                .FirstOrDefault(p => p.DeclaredName == body.Name);
+
+            // ResolveClassProperties uses DeclaredElement (semantic) — wrap in try/catch
+            // so that a missing CompilationContextCookie never kills endpoint detection.
+            List<RoutexSchemaProperty> props;
+            try { props = ResolveClassProperties(bodyParamDecl); }
+            catch { props = new List<RoutexSchemaProperty>(); }
+
             return new RoutexSchema
             {
                 TypeName = body.ParamType,
-                IsArray = body.ParamType.StartsWith("IEnumerable<") || body.ParamType.EndsWith("[]") || body.ParamType.StartsWith("List<"),
-                IsNullable = false
+                IsArray = isArray,
+                IsNullable = false,
+                Properties = props
             };
+        }
+
+        private List<RoutexSchemaProperty> ResolveClassProperties(IParameterDeclaration paramDecl)
+        {
+            if (paramDecl == null) return new List<RoutexSchemaProperty>();
+
+            var parameter = paramDecl.DeclaredElement as IParameter;
+            if (parameter == null) return new List<RoutexSchemaProperty>();
+
+            var classType = (parameter.Type as IDeclaredType)?.GetTypeElement() as IClass;
+            if (classType == null) return new List<RoutexSchemaProperty>();
+
+            var result = new List<RoutexSchemaProperty>();
+            foreach (var prop in classType.Properties)
+            {
+                if (prop.IsStatic) continue;
+                if (prop.GetAccessRights() != AccessRights.PUBLIC) continue;
+
+                var propType = prop.Type.GetLongPresentableName(CSharpLanguage.Instance);
+                var required = prop.GetAttributeInstances(AttributesSource.All)
+                    .Any(a =>
+                    {
+                        var s = a.GetAttributeType().GetClrName().ShortName;
+                        return s == "Required" || s == "RequiredAttribute";
+                    });
+
+                var hints = new List<string>();
+                foreach (var attr in prop.GetAttributeInstances(AttributesSource.All))
+                {
+                    var s = attr.GetAttributeType().GetClrName().ShortName;
+                    if (s == "StringLength" || s == "StringLengthAttribute")
+                    {
+                        var p0 = attr.PositionParameter(0);
+                        if (p0.IsConstant) hints.Add($"maxLength:{p0.ConstantValue.Value}");
+                    }
+                    else if (s == "MinLength" || s == "MinLengthAttribute")
+                    {
+                        var p0 = attr.PositionParameter(0);
+                        if (p0.IsConstant) hints.Add($"minLength:{p0.ConstantValue.Value}");
+                    }
+                    else if (s == "MaxLength" || s == "MaxLengthAttribute")
+                    {
+                        var p0 = attr.PositionParameter(0);
+                        if (p0.IsConstant) hints.Add($"maxLength:{p0.ConstantValue.Value}");
+                    }
+                    else if (s == "Range" || s == "RangeAttribute")
+                    {
+                        var p0 = attr.PositionParameter(0);
+                        var p1 = attr.PositionParameter(1);
+                        if (p0.IsConstant && p1.IsConstant)
+                            hints.Add($"range:{p0.ConstantValue.Value}..{p1.ConstantValue.Value}");
+                    }
+                }
+
+                result.Add(new RoutexSchemaProperty
+                {
+                    Name = prop.ShortName,
+                    PropType = propType,
+                    Required = required,
+                    ValidationHints = hints
+                });
+            }
+
+            return result;
         }
 
         private class AuthResult
@@ -165,7 +243,7 @@ namespace ReSharperPlugin.Routex
             public string Policy { get; set; }
         }
 
-        private AuthResult GetAuthInfo(IDeclaration decl)
+        private AuthResult GetAuthInfo(IAttributesOwnerDeclaration decl)
         {
             if (HasAttribute(decl, "AllowAnonymous")) return new AuthResult { Required = false };
             if (HasAttribute(decl, "Authorize"))
@@ -173,41 +251,43 @@ namespace ReSharperPlugin.Routex
             return null;
         }
 
-        private bool HasAttribute(IDeclaration decl, string attrName)
+        // ── Syntactic helpers ─────────────────────────────────────────────────
+        // These use only the PSI syntax tree so they work without a
+        // CompilationContextCookie (no DeclaredElement resolution required).
+
+        private static bool AttributeNameMatches(IAttribute attr, string name)
         {
-            if (!(decl is IAttributesOwner owner)) return false;
-            return owner.GetAttributeInstances(AttributesSource.All)
-                .Any(a =>
-                {
-                    var s = a.GetAttributeType().GetClrName().ShortName;
-                    return s == attrName || s == attrName + "Attribute";
-                });
+            // IReferenceName.ShortName is the identifier as written (e.g. "HttpGet")
+            // without any namespace prefix, so this handles both [HttpGet] and [HttpGetAttribute].
+            var shortName = attr.Descendants<IReferenceName>().FirstOrDefault()?.ShortName ?? "";
+            return shortName == name || shortName == name + "Attribute";
         }
 
-        private bool HasParameterAttribute(IParameterDeclaration param, string attrName)
+        private static bool HasAttribute(IAttributesOwnerDeclaration decl, string attrName) =>
+            decl.Attributes.Any(a => AttributeNameMatches(a, attrName));
+
+        private static bool HasParameterAttribute(IParameterDeclaration param, string attrName)
         {
-            if (!(param is IAttributesOwner owner)) return false;
-            return owner.GetAttributeInstances(AttributesSource.All)
-                .Any(a =>
-                {
-                    var s = a.GetAttributeType().GetClrName().ShortName;
-                    return s == attrName || s == attrName + "Attribute";
-                });
+            foreach (var a in param.Descendants<IAttribute>())
+                if (AttributeNameMatches(a, attrName)) return true;
+            return false;
         }
 
-        private string GetAttributeStringValue(IDeclaration decl, string attrName)
+        private static string GetAttributeStringValue(IAttributesOwnerDeclaration decl, string attrName)
         {
-            if (!(decl is IAttributesOwner owner)) return null;
-            var attr = owner.GetAttributeInstances(AttributesSource.All)
-                .FirstOrDefault(a =>
-                {
-                    var s = a.GetAttributeType().GetClrName().ShortName;
-                    return s == attrName || s == attrName + "Attribute";
-                });
+            var attr = decl.Attributes.FirstOrDefault(a => AttributeNameMatches(a, attrName));
             if (attr == null) return null;
-            var p = attr.PositionParameter(0);
-            return p.IsConstant ? p.ConstantValue.StringValue : null;
+            // ConstantValue on a string literal is purely syntactic — no cookie needed.
+            return attr.Descendants<ICSharpLiteralExpression>().FirstOrDefault()?.ConstantValue?.StringValue;
         }
+
+        // Matches {name}, {name?}, {name:constraint}, {name:constraint?}
+        private static bool IsInRoute(string name, string route) =>
+            Regex.IsMatch(route, $@"\{{{Regex.Escape(name)}(?::[^}}]*)?\??}}");
+
+        // Matches only the optional variants: {name?} or {name:constraint?}
+        private static bool IsOptionalInRoute(string name, string route) =>
+            Regex.IsMatch(route, $@"\{{{Regex.Escape(name)}(?::[^}}]*)?\?}}");
 
         private bool IsSimpleType(string t) =>
             t is "int" or "long" or "string" or "bool" or "double" or "float" or "decimal"

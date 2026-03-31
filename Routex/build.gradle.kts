@@ -143,10 +143,6 @@ dependencies {
     intellijPlatform {
         rider(ProductVersion, useInstaller = false)
         jetbrainsRuntime()
-
-        // TODO: add plugins
-        // bundledPlugin("uml")
-        // bundledPlugin("com.jetbrains.ChooseRuntime:1.0.9")
     }
 }
 

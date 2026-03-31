@@ -388,3 +388,190 @@ routex/
 - **Rider Plugin Guide**: https://plugins.jetbrains.com/docs/intellij/rider.html
 - **UI Guidelines**: https://plugins.jetbrains.com/docs/intellij/ui-guidelines-welcome.html
 - **Referenzprojekt (Architektur)**: https://github.com/JetBrains/resharper-unity
+
+---
+
+## Phase 2 Feature Plan (Current)
+
+### Problem Summary
+
+| Problem | Current state | Target state |
+|---|---|---|
+| Persistence | `PropertiesComponent` (global, unstructured) | Project-scoped XML state file, exportable |
+| Analysis | Full re-scan every Refresh | Only re-analyze files changed since last scan |
+| Response display | Plain `JTextArea` | `EditorTextField` with JSON syntax highlighting |
+| Response size | Hard to read in split pane | "Open in Editor" button → scratch file |
+| Code → RouteX | No navigation | Editor context menu → jump to endpoint in tool window |
+| Param values | Not persisted | Saved alongside headers + body |
+
+---
+
+### Architecture After Phase 2
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  RouteXStateService  (PersistentStateComponent → routex.xml) │
+│  ┌──────────────────┐  ┌─────────────────────────────────┐   │
+│  │ fileHashes       │  │ savedRequests                   │   │
+│  │ Map<path, hash>  │  │ Map<endpointId, SavedRequest>   │   │
+│  └──────────────────┘  └─────────────────────────────────┘   │
+│  + exportAsPostmanCollection() / importFromPostmanCollection()│
+└──────────────────────────────────────────────────────────────┘
+           ↕ load on startup / save on change
+┌──────────────────────────────────────────────────────────────┐
+│  RouteXService  (runtime coordinator, in-memory)             │
+│  - cachedEndpoints: List<ApiEndpoint>                        │
+│  - selectEndpoint(id): notifies selection listeners          │
+└──────────────────────────────────────────────────────────────┘
+           ↕                          ↕
+┌──────────────────┐     ┌────────────────────────────────────┐
+│  C# Backend      │     │  UI Layer                          │
+│  EndpointDetector│     │  ResponsePanel: EditorTextField    │
+│  - _fileHashes   │     │  EndpointTree: selectEndpoint(id)  │
+│  - skip unchanged│     │  OpenInRouteXAction: editor menu   │
+└──────────────────┘     └────────────────────────────────────┘
+```
+
+---
+
+### Feature 1: `RouteXStateService` — Persistent Storage
+
+**New file**: `src/rider/main/kotlin/com/routex/RouteXStateService.kt`
+
+```kotlin
+@Service(Service.Level.PROJECT)
+@State(name = "RouteX", storages = [Storage("routex.xml")])
+class RouteXStateService : PersistentStateComponent<RouteXStateService.State> {
+    data class State(
+        var fileHashes: MutableMap<String, String> = mutableMapOf(),
+        var savedRequests: MutableMap<String, SavedRequest> = mutableMapOf()
+    )
+    data class SavedRequest(
+        var headers: String = "",
+        var body: String = "",
+        var paramValues: MutableMap<String, String> = mutableMapOf()
+    )
+    fun getSavedRequest(endpointId: String): SavedRequest?
+    fun setSavedRequest(endpointId: String, req: SavedRequest)
+    fun exportAsPostmanCollection(endpoints: List<ApiEndpoint>): String  // Postman v2.1 JSON
+    fun importFromPostmanCollection(json: String): List<SavedRequest>
+}
+```
+
+**Migration**: On first load, copy existing `PropertiesComponent` values to `savedRequests`, then clear them.
+
+**Export format**: Postman Collection v2.1 — `info.schema = "https://schema.getpostman.com/json/collection/v2.1.0"`.
+Each endpoint becomes a Postman `item` with `request.header`, `request.body`, and `request.url`.
+
+**Why Postman v2.1**: Widely supported by Postman, Insomnia, Bruno, and other API tools. Enables round-trip import/export.
+
+---
+
+### Feature 2: Incremental Analysis (C# `EndpointDetector.cs`)
+
+**Changed file**: `src/dotnet/ReSharperPlugin.Routex/EndpointDetector.cs`
+
+```csharp
+private readonly Dictionary<string, string> _fileHashes = new();
+private readonly Dictionary<string, List<RoutexEndpoint>> _cachedEndpoints = new();
+
+// In DetectAll():
+// 1. Compute MD5(file content)
+// 2. If hash == _fileHashes[path] → use _cachedEndpoints[path]
+// 3. Else → re-analyze → update both dicts
+// 4. Remove entries for files no longer in solution
+// 5. Return _cachedEndpoints.Values.SelectMany(x => x)
+```
+
+No protocol changes needed. Self-contained in `EndpointDetector`.
+
+---
+
+### Feature 3: JSON Syntax Highlighting in `ResponsePanel`
+
+**Changed file**: `src/rider/main/kotlin/com/routex/toolwindow/ResponsePanel.kt`
+
+Replace `JTextArea bodyArea` with:
+```kotlin
+private val bodyField = EditorTextField("", project, JsonFileType.INSTANCE).apply {
+    isViewer = true
+    setOneLineMode(false)
+}
+```
+
+`ResponsePanel(private val project: Project)` — `DetailPanel` passes `project` through.
+
+Custom JSON formatter can be removed (IntelliJ handles it).
+
+---
+
+### Feature 4: Open Response in New Editor Tab
+
+**Changed file**: `ResponsePanel.kt` — add button in header:
+```kotlin
+ScratchRootType.getInstance()
+    .createScratchFile(project, "routex-response.json", JsonLanguage.INSTANCE, bodyField.text)
+    ?.let { FileEditorManager.getInstance(project).openFile(it, true) }
+```
+
+---
+
+### Feature 5: Code → RouteX Navigation
+
+**New file**: `src/rider/main/kotlin/com/routex/actions/OpenInRouteXAction.kt`
+
+```kotlin
+class OpenInRouteXAction : AnAction("Open in RouteX") {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val editor = e.getData(CommonDataKeys.EDITOR) ?: return
+        val file = e.getData(CommonDataKeys.PSI_FILE) ?: return
+        val caretLine = editor.caretModel.logicalPosition.line + 1
+        val filePath = file.virtualFile?.path ?: return
+
+        val service = RouteXService.getInstance(project)
+        val match = service.endpoints
+            .filter { it.filePath == filePath && it.lineNumber <= caretLine }
+            .maxByOrNull { it.lineNumber } ?: return
+
+        ToolWindowManager.getInstance(project).getToolWindow("RouteX")?.show(null)
+        service.selectEndpoint(match.id)
+    }
+    override fun update(e: AnActionEvent) {
+        // Show only for .cs files
+        e.presentation.isVisible = e.getData(CommonDataKeys.PSI_FILE)
+            ?.virtualFile?.extension?.equals("cs", ignoreCase = true) == true
+    }
+}
+```
+
+**`RouteXService`**: Add `selectEndpoint(id)` that notifies `selectionListeners`.
+**`RouteXPanel`**: Register selection listener → calls `endpointTree.selectEndpoint(id)`.
+**`EndpointTree`**: Add `selectEndpoint(id)` → walks tree model, selects and scrolls to matching node.
+**`plugin.xml`**: Register action in `<group id="EditorPopupMenu">`.
+
+---
+
+### Feature 6: Persist Param Values
+
+**Changed file**: `RequestPanel.kt`
+
+- Replace `props.getValue(headersKey(id))` / `props.setValue(...)` with `stateService.getSavedRequest(id)`
+- Also save `paramValues` map: iterate `paramFields`, store non-empty values keyed by param name
+- On `showEndpoint`: restore param field text from `savedRequest.paramValues[param.name]` before building URL
+
+---
+
+### Implementation Order
+
+1. `RouteXStateService.kt` — foundation
+2. `RequestPanel.kt` — migrate to StateService, add param value persistence
+3. `EndpointDetector.cs` — file hash cache
+4. `ResponsePanel.kt` + `DetailPanel.kt` — EditorTextField + open in editor
+5. `RouteXService.kt` + `EndpointTree.kt` + `RouteXPanel.kt` — selectEndpoint wiring
+6. `OpenInRouteXAction.kt` + `plugin.xml` — code → RouteX navigation
+
+### Out of Scope (Phase 3)
+- **Diff view**: Compare current response against saved baseline. Needs `lastResponse: SavedResponse?` added to `SavedRequest` in StateService.
+- **File watcher**: Trigger auto-refresh when `.cs` files change (PSI listener or `VirtualFileListener`).
+- **Environment variables**: Named URL presets (dev/staging/prod) stored in StateService.

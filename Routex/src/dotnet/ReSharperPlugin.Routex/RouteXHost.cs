@@ -13,7 +13,7 @@ using JetBrains.Util.Logging;
 
 namespace ReSharperPlugin.Routex
 {
-    [SolutionComponent(Instantiation.DemandAnyThreadSafe)]
+    [SolutionComponent(Instantiation.ContainerAsyncPrimaryThread)]
     public class RouteXHost
     {
         private readonly ILogger _logger = Logger.GetLogger<RouteXHost>();
@@ -99,7 +99,12 @@ namespace ReSharperPlugin.Routex
         private static RdApiSchema ConvertSchema(RoutexSchema s) =>
             new RdApiSchema(
                 typeName: s.TypeName ?? "",
-                properties: new List<RdApiSchemaProperty>(),
+                properties: s.Properties.Select(p => new RdApiSchemaProperty(
+                    name: p.Name ?? "",
+                    propType: p.PropType ?? "",
+                    required: p.Required,
+                    validationHints: p.ValidationHints ?? new List<string>()
+                )).ToList(),
                 isArray: s.IsArray,
                 isNullable: s.IsNullable
             );

@@ -1,12 +1,15 @@
 package com.routex
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.jetbrains.rd.framework.RdTaskResult
 import com.jetbrains.rd.ide.model.RdApiEndpoint
 import com.jetbrains.rd.ide.model.RdApiParameter
+import com.jetbrains.rd.ide.model.RdApiSchema
+import com.jetbrains.rd.ide.model.RdApiSchemaProperty
 import com.jetbrains.rd.ide.model.RdHttpMethod
 import com.jetbrains.rd.ide.model.RdParameterSource
 import com.jetbrains.rd.ide.model.routeXModel
@@ -20,6 +23,8 @@ class RouteXService(private val project: Project) : Disposable {
     private val lifetimeDef = LifetimeDefinition()
     private val lifetime = lifetimeDef.lifetime
     private val listeners = mutableListOf<(List<ApiEndpoint>) -> Unit>()
+    private val loadingListeners = mutableListOf<(Boolean) -> Unit>()
+    private val selectionListeners = mutableListOf<(String) -> Unit>()
     private var cachedEndpoints: List<ApiEndpoint> = emptyList()
 
     val endpoints: List<ApiEndpoint>
@@ -31,12 +36,16 @@ class RouteXService(private val project: Project) : Disposable {
     }
 
     fun refresh() {
+        notifyLoading(true)
         val model = project.solution.routeXModel
         model.getEndpoints.start(lifetime, Unit).result.advise(lifetime) { result ->
-            when (result) {
-                is RdTaskResult.Success -> setEndpoints(result.value.map { it.toApiEndpoint() })
-                is RdTaskResult.Cancelled -> { /* no-op */ }
-                is RdTaskResult.Fault -> { /* silently ignore */ }
+            ApplicationManager.getApplication().invokeLater {
+                when (result) {
+                    is RdTaskResult.Success -> setEndpoints(result.value.map { it.toApiEndpoint() })
+                    is RdTaskResult.Cancelled -> {}
+                    is RdTaskResult.Fault -> {}
+                }
+                notifyLoading(false)
             }
         }
     }
@@ -46,14 +55,39 @@ class RouteXService(private val project: Project) : Disposable {
         return { listeners.remove(listener) }
     }
 
+    fun addLoadingListener(listener: (Boolean) -> Unit): () -> Unit {
+        loadingListeners.add(listener)
+        return { loadingListeners.remove(listener) }
+    }
+
+    /** Notify the UI to focus and select the given endpoint by ID. */
+    fun selectEndpoint(id: String) {
+        ApplicationManager.getApplication().invokeLater {
+            selectionListeners.toList().forEach { it(id) }
+        }
+    }
+
+    fun addSelectionListener(listener: (String) -> Unit): () -> Unit {
+        selectionListeners.add(listener)
+        return { selectionListeners.remove(listener) }
+    }
+
     private fun notifyListeners() {
         val snapshot = cachedEndpoints
         listeners.toList().forEach { it(snapshot) }
     }
 
+    private fun notifyLoading(loading: Boolean) {
+        ApplicationManager.getApplication().invokeLater {
+            loadingListeners.toList().forEach { it(loading) }
+        }
+    }
+
     override fun dispose() {
         lifetimeDef.terminate()
         listeners.clear()
+        loadingListeners.clear()
+        selectionListeners.clear()
     }
 
     companion object {
@@ -61,25 +95,32 @@ class RouteXService(private val project: Project) : Disposable {
     }
 }
 
-private fun RdApiEndpoint.toApiEndpoint() = ApiEndpoint(
-    id = id,
-    httpMethod = httpMethod.toHttpMethod(),
-    route = route,
-    rawRouteSegments = route.split("/").filter { it.isNotEmpty() },
-    filePath = filePath,
-    lineNumber = lineNumber,
-    controllerName = controllerName,
-    methodName = methodName,
-    language = SupportedLanguage.CSHARP,
-    parameters = parameters.map { it.toApiParameter() },
-    auth = if (authRequired) AuthInfo(required = true, type = null, policy = authPolicy) else null,
-    responses = emptyList(),
-    meta = EndpointMeta(
-        contentHash = contentHash,
-        analysisConfidence = analysisConfidence,
-        analysisWarnings = analysisWarnings
+private fun RdApiEndpoint.toApiEndpoint(): ApiEndpoint {
+    val schema = bodySchema?.toApiSchema()
+    val params = parameters.map { rdParam ->
+        val p = rdParam.toApiParameter()
+        if (schema != null && p.source == ParameterSource.BODY) p.copy(schema = schema) else p
+    }
+    return ApiEndpoint(
+        id = id,
+        httpMethod = httpMethod.toHttpMethod(),
+        route = route,
+        rawRouteSegments = route.split("/").filter { it.isNotEmpty() },
+        filePath = filePath,
+        lineNumber = lineNumber,
+        controllerName = controllerName,
+        methodName = methodName,
+        language = SupportedLanguage.CSHARP,
+        parameters = params,
+        auth = if (authRequired) AuthInfo(required = true, type = null, policy = authPolicy) else null,
+        responses = emptyList(),
+        meta = EndpointMeta(
+            contentHash = contentHash,
+            analysisConfidence = analysisConfidence,
+            analysisWarnings = analysisWarnings
+        )
     )
-)
+}
 
 private fun RdHttpMethod.toHttpMethod() = when (this) {
     RdHttpMethod.GET -> HttpMethod.GET
@@ -90,6 +131,20 @@ private fun RdHttpMethod.toHttpMethod() = when (this) {
     RdHttpMethod.HEAD -> HttpMethod.HEAD
     RdHttpMethod.OPTIONS -> HttpMethod.OPTIONS
 }
+
+private fun RdApiSchema.toApiSchema(): ApiSchema = ApiSchema(
+    typeName = typeName,
+    properties = properties.map { it.toApiSchemaProperty() },
+    isArray = isArray,
+    isNullable = isNullable
+)
+
+private fun RdApiSchemaProperty.toApiSchemaProperty(): ApiSchemaProperty = ApiSchemaProperty(
+    name = name,
+    type = propType,
+    required = required,
+    validationHints = validationHints
+)
 
 private fun RdApiParameter.toApiParameter() = ApiParameter(
     name = name,

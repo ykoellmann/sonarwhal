@@ -1,6 +1,5 @@
 package com.routex.toolwindow
 
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
@@ -17,17 +16,10 @@ class RouteXToolWindowFactory : ToolWindowFactory, DumbAware {
 
         val service = RouteXService.getInstance(project)
 
-        // Populate tree with whatever is already cached (e.g. from a previous refresh)
+        // Seed with whatever the service already has cached (e.g. from startup activity)
         panel.updateEndpoints(service.endpoints)
 
-        // Update tree whenever the service receives new endpoints
-        service.addListener { endpoints ->
-            ApplicationManager.getApplication().invokeLater {
-                panel.updateEndpoints(endpoints)
-            }
-        }
-
-        // Trigger initial scan from C# backend (no-op until rdgen runs)
+        // RouteXPanel.init already registered an endpoint listener; trigger the initial scan.
         service.refresh()
     }
 

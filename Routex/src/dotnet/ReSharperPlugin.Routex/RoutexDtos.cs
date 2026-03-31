@@ -50,5 +50,14 @@ namespace ReSharperPlugin.Routex
         public string TypeName { get; set; }
         public bool IsArray { get; set; }
         public bool IsNullable { get; set; }
+        public List<RoutexSchemaProperty> Properties { get; set; } = new List<RoutexSchemaProperty>();
+    }
+
+    public class RoutexSchemaProperty
+    {
+        public string Name { get; set; }
+        public string PropType { get; set; }
+        public bool Required { get; set; }
+        public List<string> ValidationHints { get; set; } = new List<string>();
     }
 }

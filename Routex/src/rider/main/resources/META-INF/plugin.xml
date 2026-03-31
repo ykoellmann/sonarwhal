@@ -42,6 +42,9 @@
     <!-- Project-level service that holds the cached endpoint list -->
     <projectService serviceImplementation="com.routex.RouteXService"/>
 
+    <!-- Project-level service that persists base URL, saved requests, and param values -->
+    <projectService serviceImplementation="com.routex.RouteXStateService"/>
+
     <!-- App-level registry for PSI-based endpoint providers -->
     <applicationService serviceImplementation="com.routex.providers.EndpointProviderRegistry"/>
 
@@ -54,5 +57,14 @@
   <extensions defaultExtensionNs="com.jetbrains.rider.plugins.routex">
     <endpointProvider implementation="com.routex.providers.csharp.CSharpEndpointProvider"/>
   </extensions>
+
+  <actions>
+    <action id="Routex.OpenInRouteX"
+            class="com.routex.actions.OpenInRouteXAction"
+            text="Open in RouteX"
+            description="Jump to this endpoint in the RouteX tool window">
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+  </actions>
 
 </idea-plugin>
