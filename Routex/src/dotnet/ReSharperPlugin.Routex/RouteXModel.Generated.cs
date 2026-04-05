@@ -43,32 +43,47 @@ namespace JetBrains.Rider.Model
     //fields
     //public fields
     [NotNull] public IRdEndpoint<Unit, List<RdApiEndpoint>> GetEndpoints => _GetEndpoints;
+    [NotNull] public IRdEndpoint<Unit, Unit> ClearCache => _ClearCache;
     [NotNull] public ISignal<List<RdApiEndpoint>> EndpointsUpdated => _EndpointsUpdated;
-    
+    [NotNull] public ISignal<string> NavigateToEndpoint => _NavigateToEndpoint;
+
     //private fields
     [NotNull] private readonly RdCall<Unit, List<RdApiEndpoint>> _GetEndpoints;
+    [NotNull] private readonly RdCall<Unit, Unit> _ClearCache;
     [NotNull] private readonly RdSignal<List<RdApiEndpoint>> _EndpointsUpdated;
+    [NotNull] private readonly RdSignal<string> _NavigateToEndpoint;
     
     //primary constructor
     private RouteXModel(
       [NotNull] RdCall<Unit, List<RdApiEndpoint>> getEndpoints,
-      [NotNull] RdSignal<List<RdApiEndpoint>> endpointsUpdated
+      [NotNull] RdCall<Unit, Unit> clearCache,
+      [NotNull] RdSignal<List<RdApiEndpoint>> endpointsUpdated,
+      [NotNull] RdSignal<string> navigateToEndpoint
     )
     {
       if (getEndpoints == null) throw new ArgumentNullException("getEndpoints");
+      if (clearCache == null) throw new ArgumentNullException("clearCache");
       if (endpointsUpdated == null) throw new ArgumentNullException("endpointsUpdated");
-      
+      if (navigateToEndpoint == null) throw new ArgumentNullException("navigateToEndpoint");
+
       _GetEndpoints = getEndpoints;
+      _ClearCache = clearCache;
       _EndpointsUpdated = endpointsUpdated;
+      _NavigateToEndpoint = navigateToEndpoint;
       _GetEndpoints.Async = true;
+      _ClearCache.Async = true;
       BindableChildren.Add(new KeyValuePair<string, object>("getEndpoints", _GetEndpoints));
+      BindableChildren.Add(new KeyValuePair<string, object>("clearCache", _ClearCache));
       BindableChildren.Add(new KeyValuePair<string, object>("endpointsUpdated", _EndpointsUpdated));
+      BindableChildren.Add(new KeyValuePair<string, object>("navigateToEndpoint", _NavigateToEndpoint));
     }
     //secondary constructor
     internal RouteXModel (
     ) : this (
       new RdCall<Unit, List<RdApiEndpoint>>(JetBrains.Rd.Impl.Serializers.ReadVoid, JetBrains.Rd.Impl.Serializers.WriteVoid, ReadRdApiEndpointList, WriteRdApiEndpointList),
-      new RdSignal<List<RdApiEndpoint>>(ReadRdApiEndpointList, WriteRdApiEndpointList)
+      new RdCall<Unit, Unit>(JetBrains.Rd.Impl.Serializers.ReadVoid, JetBrains.Rd.Impl.Serializers.WriteVoid, JetBrains.Rd.Impl.Serializers.ReadVoid, JetBrains.Rd.Impl.Serializers.WriteVoid),
+      new RdSignal<List<RdApiEndpoint>>(ReadRdApiEndpointList, WriteRdApiEndpointList),
+      new RdSignal<string>(JetBrains.Rd.Impl.Serializers.ReadString, JetBrains.Rd.Impl.Serializers.WriteString)
     ) {}
     //deconstruct trait
     //statics
@@ -77,7 +92,7 @@ namespace JetBrains.Rider.Model
     
     public static  CtxWriteDelegate<List<RdApiEndpoint>> WriteRdApiEndpointList = RdApiEndpoint.Write.List();
     
-    protected override long SerializationHash => -9110114302008743178L;
+    protected override long SerializationHash => 5628147192222421613L;
     
     protected override Action<ISerializers> Register => RegisterDeclaredTypesSerializers;
     public static void RegisterDeclaredTypesSerializers(ISerializers serializers)
@@ -99,7 +114,9 @@ namespace JetBrains.Rider.Model
       printer.Println("RouteXModel (");
       using (printer.IndentCookie()) {
         printer.Print("getEndpoints = "); _GetEndpoints.PrintEx(printer); printer.Println();
+        printer.Print("clearCache = "); _ClearCache.PrintEx(printer); printer.Println();
         printer.Print("endpointsUpdated = "); _EndpointsUpdated.PrintEx(printer); printer.Println();
+        printer.Print("navigateToEndpoint = "); _NavigateToEndpoint.PrintEx(printer); printer.Println();
       }
       printer.Print(")");
     }

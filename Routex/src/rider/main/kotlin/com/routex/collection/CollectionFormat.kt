@@ -3,9 +3,9 @@ package com.routex.collection
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
-import com.routex.RouteXStateService.SavedRequest
 import com.routex.model.ApiEndpoint
 import com.routex.model.ParameterSource
+import com.routex.model.SavedRequest
 
 /**
  * Exports the current endpoint list and saved requests into a collection format.

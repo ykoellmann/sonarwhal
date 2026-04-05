@@ -45,6 +45,9 @@
     <!-- Project-level service that persists base URL, saved requests, and param values -->
     <projectService serviceImplementation="com.routex.RouteXStateService"/>
 
+    <!-- Project-level service that renders gutter play-icons on C# endpoint methods -->
+    <projectService serviceImplementation="com.routex.gutter.RouteXGutterService"/>
+
     <!-- App-level registry for PSI-based endpoint providers -->
     <applicationService serviceImplementation="com.routex.providers.EndpointProviderRegistry"/>
 

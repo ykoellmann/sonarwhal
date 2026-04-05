@@ -60,7 +60,7 @@ tasks.compileKotlin {
 
 val setBuildTool by tasks.registering {
     doLast {
-        extra["executable"] = "dotnet"
+        extra["executable"] = "/opt/homebrew/bin/dotnet"
         var args = mutableListOf("msbuild")
 
         if (isWindows) {

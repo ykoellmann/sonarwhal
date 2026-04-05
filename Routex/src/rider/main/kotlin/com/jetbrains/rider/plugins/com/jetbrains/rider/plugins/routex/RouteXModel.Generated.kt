@@ -20,7 +20,9 @@ import kotlin.jvm.JvmStatic
  */
 class RouteXModel private constructor(
     private val _getEndpoints: RdCall<Unit, List<RdApiEndpoint>>,
-    private val _endpointsUpdated: RdSignal<List<RdApiEndpoint>>
+    private val _clearCache: RdCall<Unit, Unit>,
+    private val _endpointsUpdated: RdSignal<List<RdApiEndpoint>>,
+    private val _navigateToEndpoint: RdSignal<String>
 ) : RdExtBase() {
     //companion
     
@@ -41,7 +43,7 @@ class RouteXModel private constructor(
         
         private val __RdApiEndpointListSerializer = RdApiEndpoint.list()
         
-        const val serializationHash = -9110114302008743178L
+        const val serializationHash = 5628147192222421613L
         
     }
     override val serializersOwner: ISerializersOwner get() = RouteXModel
@@ -49,23 +51,30 @@ class RouteXModel private constructor(
     
     //fields
     val getEndpoints: IRdCall<Unit, List<RdApiEndpoint>> get() = _getEndpoints
+    val clearCache: IRdCall<Unit, Unit> get() = _clearCache
     val endpointsUpdated: ISignal<List<RdApiEndpoint>> get() = _endpointsUpdated
+    val navigateToEndpoint: ISignal<String> get() = _navigateToEndpoint
     //methods
     //initializer
     init {
         _getEndpoints.async = true
+        _clearCache.async = true
     }
     
     init {
         bindableChildren.add("getEndpoints" to _getEndpoints)
+        bindableChildren.add("clearCache" to _clearCache)
         bindableChildren.add("endpointsUpdated" to _endpointsUpdated)
+        bindableChildren.add("navigateToEndpoint" to _navigateToEndpoint)
     }
     
     //secondary constructor
     internal constructor(
     ) : this(
         RdCall<Unit, List<RdApiEndpoint>>(FrameworkMarshallers.Void, __RdApiEndpointListSerializer),
-        RdSignal<List<RdApiEndpoint>>(__RdApiEndpointListSerializer)
+        RdCall<Unit, Unit>(FrameworkMarshallers.Void, FrameworkMarshallers.Void),
+        RdSignal<List<RdApiEndpoint>>(__RdApiEndpointListSerializer),
+        RdSignal<String>(FrameworkMarshallers.String)
     )
     
     //equals trait
@@ -75,7 +84,9 @@ class RouteXModel private constructor(
         printer.println("RouteXModel (")
         printer.indent {
             print("getEndpoints = "); _getEndpoints.print(printer); println()
+            print("clearCache = "); _clearCache.print(printer); println()
             print("endpointsUpdated = "); _endpointsUpdated.print(printer); println()
+            print("navigateToEndpoint = "); _navigateToEndpoint.print(printer); println()
         }
         printer.print(")")
     }
@@ -83,7 +94,9 @@ class RouteXModel private constructor(
     override fun deepClone(): RouteXModel   {
         return RouteXModel(
             _getEndpoints.deepClonePolymorphic(),
-            _endpointsUpdated.deepClonePolymorphic()
+            _clearCache.deepClonePolymorphic(),
+            _endpointsUpdated.deepClonePolymorphic(),
+            _navigateToEndpoint.deepClonePolymorphic()
         )
     }
     //contexts

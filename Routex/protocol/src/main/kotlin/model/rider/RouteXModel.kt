@@ -66,6 +66,8 @@ object RouteXModel : Ext(SolutionModel.Solution) {
 
     init {
         call("getEndpoints", void, immutableList(RdApiEndpoint)).async
+        call("clearCache", void, void).async
         signal("endpointsUpdated", immutableList(RdApiEndpoint))
+        signal("navigateToEndpoint", string)
     }
 }

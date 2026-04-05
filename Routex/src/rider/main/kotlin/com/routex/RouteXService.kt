@@ -5,6 +5,10 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent
+import com.intellij.util.Alarm
+import com.intellij.openapi.wm.ToolWindowManager
 import com.jetbrains.rd.framework.RdTaskResult
 import com.jetbrains.rd.ide.model.RdApiEndpoint
 import com.jetbrains.rd.ide.model.RdApiParameter
@@ -25,10 +29,31 @@ class RouteXService(private val project: Project) : Disposable {
     private val listeners = mutableListOf<(List<ApiEndpoint>) -> Unit>()
     private val loadingListeners = mutableListOf<(Boolean) -> Unit>()
     private val selectionListeners = mutableListOf<(String) -> Unit>()
+    private val runRequestListeners = mutableListOf<(endpointId: String, requestId: String) -> Unit>()
     private var cachedEndpoints: List<ApiEndpoint> = emptyList()
+
+    // Debounced file watcher: a single Alarm fires 500ms after the last .cs file change
+    private val refreshAlarm = Alarm(Alarm.ThreadToUse.POOLED_THREAD, this)
 
     val endpoints: List<ApiEndpoint>
         get() = cachedEndpoints
+
+    private var modelSubscribed = false
+
+    init {
+        // One global listener for all VFS events; debounces rapid saves with a 500ms Alarm
+        project.messageBus.connect(this).subscribe(
+            com.intellij.openapi.vfs.VirtualFileManager.VFS_CHANGES,
+            object : BulkFileListener {
+                override fun after(events: List<VFileEvent>) {
+                    val hasCsChange = events.any { it.file?.extension == "cs" }
+                    if (!hasCsChange) return
+                    refreshAlarm.cancelAllRequests()
+                    refreshAlarm.addRequest({ refresh() }, 500)
+                }
+            }
+        )
+    }
 
     fun setEndpoints(endpoints: List<ApiEndpoint>) {
         cachedEndpoints = endpoints
@@ -38,6 +63,15 @@ class RouteXService(private val project: Project) : Disposable {
     fun refresh() {
         notifyLoading(true)
         val model = project.solution.routeXModel
+        if (!modelSubscribed) {
+            modelSubscribed = true
+            model.navigateToEndpoint.advise(lifetime) { endpointId ->
+                ApplicationManager.getApplication().invokeLater {
+                    ToolWindowManager.getInstance(project).getToolWindow("RouteX")?.show(null)
+                    selectEndpoint(endpointId)
+                }
+            }
+        }
         model.getEndpoints.start(lifetime, Unit).result.advise(lifetime) { result ->
             ApplicationManager.getApplication().invokeLater {
                 when (result) {
@@ -46,6 +80,25 @@ class RouteXService(private val project: Project) : Disposable {
                     is RdTaskResult.Fault -> {}
                 }
                 notifyLoading(false)
+            }
+        }
+    }
+
+    /** Clears the C# backend cache then runs a full endpoint scan. */
+    fun reScan() {
+        notifyLoading(true)
+        val model = project.solution.routeXModel
+        model.clearCache.start(lifetime, Unit).result.advise(lifetime) {
+            // Cache is now clear — do a full scan
+            model.getEndpoints.start(lifetime, Unit).result.advise(lifetime) { result ->
+                ApplicationManager.getApplication().invokeLater {
+                    when (result) {
+                        is RdTaskResult.Success -> setEndpoints(result.value.map { it.toApiEndpoint() })
+                        is RdTaskResult.Cancelled -> {}
+                        is RdTaskResult.Fault -> {}
+                    }
+                    notifyLoading(false)
+                }
             }
         }
     }
@@ -72,6 +125,18 @@ class RouteXService(private val project: Project) : Disposable {
         return { selectionListeners.remove(listener) }
     }
 
+    /** Asks the UI to select the endpoint, load the specified request, and send it immediately. */
+    fun runRequest(endpointId: String, requestId: String) {
+        ApplicationManager.getApplication().invokeLater {
+            runRequestListeners.toList().forEach { it(endpointId, requestId) }
+        }
+    }
+
+    fun addRunRequestListener(listener: (String, String) -> Unit): () -> Unit {
+        runRequestListeners.add(listener)
+        return { runRequestListeners.remove(listener) }
+    }
+
     private fun notifyListeners() {
         val snapshot = cachedEndpoints
         listeners.toList().forEach { it(snapshot) }
@@ -88,6 +153,7 @@ class RouteXService(private val project: Project) : Disposable {
         listeners.clear()
         loadingListeners.clear()
         selectionListeners.clear()
+        runRequestListeners.clear()
     }
 
     companion object {
