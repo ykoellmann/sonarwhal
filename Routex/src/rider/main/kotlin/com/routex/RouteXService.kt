@@ -30,13 +30,16 @@ class RouteXService(private val project: Project) : Disposable {
     private val loadingListeners = mutableListOf<(Boolean) -> Unit>()
     private val selectionListeners = mutableListOf<(String) -> Unit>()
     private val runRequestListeners = mutableListOf<(endpointId: String, requestId: String) -> Unit>()
-    private var cachedEndpoints: List<ApiEndpoint> = emptyList()
+
+    // One slot per language provider. Any provider calls setEndpointsForLanguage() with its
+    // own SupportedLanguage key; the unified `endpoints` property merges all slots.
+    private val endpointsByLanguage = mutableMapOf<SupportedLanguage, List<ApiEndpoint>>()
 
     // Debounced file watcher: a single Alarm fires 500ms after the last .cs file change
     private val refreshAlarm = Alarm(Alarm.ThreadToUse.POOLED_THREAD, this)
 
     val endpoints: List<ApiEndpoint>
-        get() = cachedEndpoints
+        get() = endpointsByLanguage.values.flatten()
 
     private var modelSubscribed = false
 
@@ -55,8 +58,15 @@ class RouteXService(private val project: Project) : Disposable {
         )
     }
 
-    fun setEndpoints(endpoints: List<ApiEndpoint>) {
-        cachedEndpoints = endpoints
+    /**
+     * Replaces the cached endpoint list for [language] and notifies all UI listeners.
+     *
+     * Each language provider owns exactly one slot in [endpointsByLanguage].
+     * Adding a new language (Java, TypeScript, Go, …) requires no changes here —
+     * the provider simply calls this with its own [SupportedLanguage] key.
+     */
+    fun setEndpointsForLanguage(language: SupportedLanguage, endpoints: List<ApiEndpoint>) {
+        endpointsByLanguage[language] = endpoints
         notifyListeners()
     }
 
@@ -75,7 +85,7 @@ class RouteXService(private val project: Project) : Disposable {
         model.getEndpoints.start(lifetime, Unit).result.advise(lifetime) { result ->
             ApplicationManager.getApplication().invokeLater {
                 when (result) {
-                    is RdTaskResult.Success -> setEndpoints(result.value.map { it.toApiEndpoint() })
+                    is RdTaskResult.Success -> setEndpointsForLanguage(SupportedLanguage.CSHARP, result.value.map { it.toApiEndpoint() })
                     is RdTaskResult.Cancelled -> {}
                     is RdTaskResult.Fault -> {}
                 }
@@ -93,7 +103,7 @@ class RouteXService(private val project: Project) : Disposable {
             model.getEndpoints.start(lifetime, Unit).result.advise(lifetime) { result ->
                 ApplicationManager.getApplication().invokeLater {
                     when (result) {
-                        is RdTaskResult.Success -> setEndpoints(result.value.map { it.toApiEndpoint() })
+                        is RdTaskResult.Success -> setEndpointsForLanguage(SupportedLanguage.CSHARP, result.value.map { it.toApiEndpoint() })
                         is RdTaskResult.Cancelled -> {}
                         is RdTaskResult.Fault -> {}
                     }
@@ -138,7 +148,7 @@ class RouteXService(private val project: Project) : Disposable {
     }
 
     private fun notifyListeners() {
-        val snapshot = cachedEndpoints
+        val snapshot = endpoints
         listeners.toList().forEach { it(snapshot) }
     }
 
@@ -154,6 +164,7 @@ class RouteXService(private val project: Project) : Disposable {
         loadingListeners.clear()
         selectionListeners.clear()
         runRequestListeners.clear()
+        endpointsByLanguage.clear()
     }
 
     companion object {

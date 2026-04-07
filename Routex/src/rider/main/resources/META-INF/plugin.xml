@@ -7,6 +7,9 @@
 
   <depends>com.intellij.modules.rider</depends>
 
+  <!-- Python support — loaded only when the Python plugin (PythonCore) is installed in Rider -->
+  <depends optional="true" config-file="routex-python.xml">com.intellij.modules.python</depends>
+
   <description>
 <![CDATA[
 <p><b>Routex</b> automatically detects API endpoints from your source code and makes them testable directly inside Rider.</p>

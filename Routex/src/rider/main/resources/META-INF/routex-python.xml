@@ -1,0 +1,23 @@
+<idea-plugin>
+
+  <!-- Project service: full project scan on startup + VFS watcher for .py changes -->
+  <extensions defaultExtensionNs="com.intellij">
+    <projectService serviceImplementation="com.routex.providers.python.PythonScanService"/>
+    <postStartupActivity implementation="com.routex.providers.python.PythonStartupActivity"/>
+
+    <!-- Gutter play-icons on Python endpoint functions -->
+    <codeInsight.lineMarkerProvider
+        language="Python"
+        implementationClass="com.routex.providers.python.PythonEndpointLineMarkerProvider"/>
+
+    <!-- Find Usages: intercept find usages on Python endpoint functions -->
+    <findUsagesHandlerFactory
+        implementation="com.routex.providers.python.PythonEndpointFindUsagesHandlerFactory"/>
+  </extensions>
+
+  <!-- Register the Python endpoint provider -->
+  <extensions defaultExtensionNs="com.jetbrains.rider.plugins.routex">
+    <endpointProvider implementation="com.routex.providers.python.PythonEndpointProvider"/>
+  </extensions>
+
+</idea-plugin>
