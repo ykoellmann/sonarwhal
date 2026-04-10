@@ -72,6 +72,17 @@ class ResponsePanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     fun showResponse(statusCode: Int, body: String, durationMs: Long) {
+        if (statusCode == 0) {
+            // Not an HTTP response — a connection/network error.
+            statusLabel.text = "Error"
+            statusLabel.foreground = JBColor(Color(0xCC, 0x00, 0x00), Color(0xFF, 0x44, 0x44))
+            durationLabel.text = ""
+            bodyArea.text = body
+            bodyArea.caretPosition = 0
+            openButton.isVisible = false
+            return
+        }
+
         statusLabel.text = "HTTP $statusCode"
         statusLabel.foreground = statusColor(statusCode)
         durationLabel.text = "${durationMs}ms"

@@ -4,7 +4,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using JetBrains.DocumentModel;
 using JetBrains.ReSharper.Psi;
 using JetBrains.ReSharper.Psi.CSharp;
 using JetBrains.ReSharper.Psi.CSharp.Tree;
@@ -44,15 +43,21 @@ namespace ReSharperPlugin.Routex
             {
                 if (!(member is IMethodDeclaration methodDecl)) continue;
 
+                // [NonAction] explicitly opts the method out of routing.
+                if (HasAttribute(methodDecl, "NonAction")) continue;
+
                 var (httpMethod, methodRoute) = GetHttpMethodAndRoute(methodDecl);
                 if (httpMethod == null) continue;
 
-                var fullRoute = BuildFullRoute(controllerRoute, methodRoute, controllerName);
+                // [ActionName("customName")] overrides the name used in [action] template tokens.
+                var actionName = GetAttributeStringValue(methodDecl, "ActionName") ?? methodDecl.DeclaredName;
+
+                var fullRoute = BuildFullRoute(controllerRoute, methodRoute, controllerName, actionName);
                 var parameters = ExtractParameters(methodDecl, fullRoute);
                 var auth = GetAuthInfo(methodDecl) ?? controllerAuth;
                 var warnings = new List<string>();
 
-                if (fullRoute.Contains("{*") || fullRoute.Contains("[action]"))
+                if (fullRoute.Contains("{*"))
                     warnings.Add("Route may contain dynamic segments that could not be fully resolved");
 
                 var endpointId = ComputeHash(
@@ -104,7 +109,7 @@ namespace ReSharperPlugin.Routex
             return (null, null);
         }
 
-        private string BuildFullRoute(string controllerRoute, string methodRoute, string controllerName)
+        private string BuildFullRoute(string controllerRoute, string methodRoute, string controllerName, string actionName)
         {
             var ctrlShortName = controllerName.EndsWith("Controller")
                 ? controllerName.Substring(0, controllerName.Length - "Controller".Length)
@@ -113,9 +118,14 @@ namespace ReSharperPlugin.Routex
             var baseRoute = controllerRoute
                 .Replace("[controller]", ctrlShortName.ToLower())
                 .Replace("[Controller]", ctrlShortName)
+                .Replace("[action]", actionName.ToLower())
+                .Replace("[Action]", actionName)
                 .TrimStart('/');
 
-            methodRoute = (methodRoute ?? string.Empty).TrimStart('/');
+            methodRoute = (methodRoute ?? string.Empty)
+                .Replace("[action]", actionName.ToLower())
+                .Replace("[Action]", actionName)
+                .TrimStart('/');
 
             if (string.IsNullOrEmpty(baseRoute)) return "/" + methodRoute;
             if (string.IsNullOrEmpty(methodRoute)) return "/" + baseRoute;
@@ -293,12 +303,50 @@ namespace ReSharperPlugin.Routex
             t is "int" or "long" or "string" or "bool" or "double" or "float" or "decimal"
                 or "Guid" or "DateTime" or "int?" or "long?" or "bool?" or "double?" or "float?";
 
-        private int GetLineNumber(ITreeNode node)
+        private int GetLineNumber(IMethodDeclaration methodDecl)
         {
-            var doc = node.GetContainingFile()?.GetSourceFile()?.Document;
-            if (doc == null) return 0;
-            // Line is Int32<DocLine> (0-based); cast to int before arithmetic
-            return (int)doc.GetCoordsByOffset(node.GetTreeStartOffset().Offset).Line + 1;
+            // All PSI tree-offset approaches (GetTreeStartOffset, GetDocumentRange) produce
+            // incorrect line numbers for file-scoped namespaces (C# 10) in some SDK versions.
+            // Scanning the source file text directly for the method declaration is reliable
+            // regardless of namespace style.
+            var name = methodDecl.DeclaredName;
+            if (string.IsNullOrEmpty(name)) return 0;
+            var path = _filePath;
+            if (string.IsNullOrEmpty(path)) return 0;
+
+            try
+            {
+                var lines = System.IO.File.ReadAllLines(path);
+                for (var i = 0; i < lines.Length; i++)
+                {
+                    var line = lines[i];
+                    var idx = line.IndexOf(name, StringComparison.Ordinal);
+                    if (idx < 0) continue;
+
+                    // Skip method calls: anything preceded by a '.' (e.g. obj.Method())
+                    if (idx > 0 && line[idx - 1] == '.') continue;
+
+                    // Must be directly followed by '(' (declaration or call without spaces
+                    // — RestController actions never have spaces between name and paren in practice)
+                    var after = line.Substring(idx + name.Length).TrimStart();
+                    if (!after.StartsWith("(")) continue;
+
+                    // Skip comment lines
+                    var trimmed = line.TrimStart();
+                    if (trimmed.StartsWith("//") || trimmed.StartsWith("*")) continue;
+
+                    // Skip nameof(...) — name would be inside nameof
+                    if (idx >= 7 && line.Substring(idx - 7, 7) == "nameof(") continue;
+
+                    return i + 1; // 1-based
+                }
+            }
+            catch
+            {
+                // Fall through and return 0 on any I/O error
+            }
+
+            return 0;
         }
 
         private RoutexHttpMethod ParseHttpMethod(string method) => method switch

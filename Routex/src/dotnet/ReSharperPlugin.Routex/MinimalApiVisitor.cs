@@ -72,7 +72,7 @@ namespace ReSharperPlugin.Routex
                 FilePath = _filePath,
                 LineNumber = lineNumber,
                 ControllerName = null,
-                MethodName = $"MapHandler@{lineNumber}",
+                MethodName = route.TrimStart('/'),
                 Parameters = ExtractPathParameters(route),
                 BodySchema = null,
                 AuthRequired = false,

@@ -28,6 +28,12 @@ namespace ReSharperPlugin.Routex
             _solution = solution;
         }
 
+        public void ClearCache()
+        {
+            _fileStamps.Clear();
+            _fileCache.Clear();
+        }
+
         public List<RoutexEndpoint> DetectAllEndpoints()
         {
             var visitedPaths = new HashSet<string>();

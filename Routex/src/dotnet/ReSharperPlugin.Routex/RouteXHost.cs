@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using JetBrains.Application.Parts;
 using JetBrains.Application.Threading;
+using JetBrains.Core;
 using JetBrains.Lifetimes;
 using JetBrains.ProjectModel;
 using JetBrains.Rd.Tasks;
@@ -25,6 +26,18 @@ namespace ReSharperPlugin.Routex
             EndpointDetector detector)
         {
             var model = solution.GetProtocolSolution().GetRouteXModel();
+
+            // Handle clearCache call from the Kotlin frontend (Re-Scan)
+            model.ClearCache.Set((lt, _) =>
+            {
+                var task = new RdTask<Unit>();
+                shellLocks.ExecuteOrQueueReadLock(lt, "RouteX.ClearCache", () =>
+                {
+                    detector.ClearCache();
+                    task.Set(Unit.Instance);
+                });
+                return task;
+            });
 
             // Handle getEndpoints call from the Kotlin frontend
             model.GetEndpoints.Set((lt, _) =>

@@ -1,32 +1,47 @@
 package com.routex.toolwindow
 
+import com.intellij.icons.AllIcons
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.project.Project
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.JBColor
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.treeStructure.Tree
+import com.routex.RouteXStateService
 import com.routex.model.ApiEndpoint
 import com.routex.model.HttpMethod
+import com.routex.model.SavedRequest
 import java.awt.Color
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-import javax.swing.JMenuItem
-import javax.swing.JPopupMenu
+import javax.swing.Icon
 import javax.swing.JTree
 import javax.swing.SwingUtilities
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreeSelectionModel
 
-/**
- * Wrapper stored in tree nodes so toString() is always readable even if the
- * cell renderer's `is` check fails (e.g. classloader edge cases during hot-reload).
- */
+// ── Node types ────────────────────────────────────────────────────────────────
+
+/** Schema node: the detected endpoint (not directly runnable without a SavedRequest). */
 class EndpointNode(val endpoint: ApiEndpoint) {
-    override fun toString() = "${endpoint.httpMethod.name.padEnd(7)} ${endpoint.methodName}()"
+    private fun displayName() = if (endpoint.controllerName != null) "${endpoint.methodName}()" else endpoint.methodName
+    override fun toString() = "${endpoint.httpMethod.name.padEnd(7)} ${displayName()}"
 }
 
-/** Represents a controller/group node in the tree. */
+/** A named, runnable request under an EndpointNode. */
+class SavedRequestNode(val request: SavedRequest, val endpoint: ApiEndpoint) {
+    override fun toString() = request.name
+}
+
+/** The "+ New Request" leaf at the bottom of each endpoint's children. */
+class AddRequestNode(val endpoint: ApiEndpoint) {
+    override fun toString() = "New Request"
+}
+
 class ControllerNode(val name: String, val endpoints: List<ApiEndpoint>) {
     override fun toString() = name
 }
@@ -35,11 +50,18 @@ object NoResults {
     override fun toString() = "No endpoints found"
 }
 
+// ── Tree ──────────────────────────────────────────────────────────────────────
+
 class EndpointTree(private val project: Project) : Tree() {
 
     var onEndpointSelected: ((ApiEndpoint?) -> Unit)? = null
     var onControllerSelected: ((ControllerNode) -> Unit)? = null
     var onGoToSource: ((ApiEndpoint) -> Unit)? = null
+    var onRequestSelected: ((ApiEndpoint, SavedRequest) -> Unit)? = null
+    var onAddRequest: ((ApiEndpoint) -> Unit)? = null
+    var onRenameRequest: ((ApiEndpoint, SavedRequest) -> Unit)? = null
+
+    private var currentEndpoints: List<ApiEndpoint> = emptyList()
 
     init {
         selectionModel.selectionMode = TreeSelectionModel.SINGLE_TREE_SELECTION
@@ -50,15 +72,24 @@ class EndpointTree(private val project: Project) : Tree() {
         addTreeSelectionListener { e ->
             val node = e.path?.lastPathComponent as? DefaultMutableTreeNode ?: return@addTreeSelectionListener
             when (val obj = node.userObject) {
-                is EndpointNode    -> onEndpointSelected?.invoke(obj.endpoint)
-                is ControllerNode  -> onControllerSelected?.invoke(obj)
-                else               -> onEndpointSelected?.invoke(null)
+                is SavedRequestNode -> onRequestSelected?.invoke(obj.endpoint, obj.request)
+                is EndpointNode     -> {
+                    // Clicking the schema node selects its default/first request, if any
+                    val req = RouteXStateService.getInstance(project).getDefaultRequest(obj.endpoint.id)
+                    if (req != null) onRequestSelected?.invoke(obj.endpoint, req)
+                    else onEndpointSelected?.invoke(obj.endpoint)
+                }
+                is ControllerNode   -> onControllerSelected?.invoke(obj)
+                else                -> onEndpointSelected?.invoke(null)
             }
         }
 
         addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
-                if (SwingUtilities.isRightMouseButton(e)) showPopup(e)
+                when {
+                    SwingUtilities.isRightMouseButton(e) -> showPopup(e)
+                    e.clickCount == 2                    -> handleDoubleClick(e)
+                }
             }
             override fun mouseReleased(e: MouseEvent) {
                 if (e.isPopupTrigger) showPopup(e)
@@ -66,22 +97,82 @@ class EndpointTree(private val project: Project) : Tree() {
         })
     }
 
+    private fun handleDoubleClick(e: MouseEvent) {
+        val row = getRowForLocation(e.x, e.y).takeIf { it >= 0 } ?: return
+        val node = getPathForRow(row)?.lastPathComponent as? DefaultMutableTreeNode ?: return
+        if (node.userObject is EndpointNode) {
+            onAddRequest?.invoke((node.userObject as EndpointNode).endpoint)
+        }
+    }
+
     private fun showPopup(e: MouseEvent) {
         val row = getRowForLocation(e.x, e.y).takeIf { it >= 0 } ?: return
         setSelectionRow(row)
         val node = lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
-        val en = node.userObject as? EndpointNode ?: return
 
-        val menu = JPopupMenu()
-
-        val goToSource = JMenuItem("Go to Source")
-        goToSource.addActionListener { onGoToSource?.invoke(en.endpoint) }
-        menu.add(goToSource)
-
-        menu.show(e.component, e.x, e.y)
+        val group = DefaultActionGroup()
+        when (val obj = node.userObject) {
+            is EndpointNode -> {
+                group.add(popupAction("Go to Source", AllIcons.Actions.Forward) { onGoToSource?.invoke(obj.endpoint) })
+                group.add(popupAction("New Request", AllIcons.General.Add) { onAddRequest?.invoke(obj.endpoint) })
+            }
+            is SavedRequestNode -> {
+                group.add(popupAction("Rename", AllIcons.Actions.Edit) { onRenameRequest?.invoke(obj.endpoint, obj.request) })
+                if (!obj.request.isDefault) {
+                    group.add(popupAction("Set as Default", AllIcons.Actions.Execute) {
+                        RouteXStateService.getInstance(project).setDefault(obj.endpoint.id, obj.request.id)
+                        refreshTree()
+                    })
+                }
+                group.addSeparator()
+                group.add(popupAction("Remove", AllIcons.Actions.GC) {
+                    RouteXStateService.getInstance(project).removeRequest(obj.endpoint.id, obj.request.id)
+                    refreshTree()
+                })
+            }
+            else -> return
+        }
+        ActionManager.getInstance()
+            .createActionPopupMenu("RouteX.Tree", group)
+            .component
+            .show(e.component, e.x, e.y)
     }
 
-    /** Selects the tree node matching the given endpoint id. Returns true if found. */
+    private fun popupAction(text: String, icon: Icon? = null, handler: () -> Unit) =
+        object : AnAction(text, null, icon) {
+            override fun actionPerformed(e: AnActionEvent) = handler()
+        }
+
+    /** Rebuild tree from stored endpoints, refreshing request children from state. */
+    fun refreshTree() = updateEndpoints(currentEndpoints)
+
+    fun updateEndpoints(endpoints: List<ApiEndpoint>) {
+        currentEndpoints = endpoints
+        val state = RouteXStateService.getInstance(project)
+        val root = DefaultMutableTreeNode("root")
+
+        if (endpoints.isEmpty()) {
+            root.add(DefaultMutableTreeNode(NoResults))
+        } else {
+            val grouped = endpoints.groupBy { it.controllerName ?: "Minimal APIs" }
+            for ((controller, eps) in grouped.entries.sortedBy { it.key }) {
+                val controllerNode = DefaultMutableTreeNode(ControllerNode(controller, eps))
+                for (ep in eps.sortedBy { it.methodName }) {
+                    val epNode = DefaultMutableTreeNode(EndpointNode(ep))
+                    state.getRequests(ep.id).forEach { req ->
+                        epNode.add(DefaultMutableTreeNode(SavedRequestNode(req, ep)))
+                    }
+                    controllerNode.add(epNode)
+                }
+                root.add(controllerNode)
+            }
+        }
+
+        model = DefaultTreeModel(root)
+        expandAllRows()
+    }
+
+    /** Selects the EndpointNode (schema) matching the given endpoint id. */
     fun selectEndpoint(id: String): Boolean {
         val root = model?.root as? DefaultMutableTreeNode ?: return false
         val nodes = root.breadthFirstEnumeration()
@@ -98,31 +189,13 @@ class EndpointTree(private val project: Project) : Tree() {
         return false
     }
 
-    fun updateEndpoints(endpoints: List<ApiEndpoint>) {
-        val root = DefaultMutableTreeNode("root")
-
-        if (endpoints.isEmpty()) {
-            root.add(DefaultMutableTreeNode(NoResults))
-        } else {
-            val grouped = endpoints.groupBy { it.controllerName ?: "Minimal APIs" }
-            for ((controller, eps) in grouped.entries.sortedBy { it.key }) {
-                val controllerNode = DefaultMutableTreeNode(ControllerNode(controller, eps))
-                for (ep in eps.sortedBy { it.methodName }) {
-                    controllerNode.add(DefaultMutableTreeNode(EndpointNode(ep)))
-                }
-                root.add(controllerNode)
-            }
-        }
-
-        model = DefaultTreeModel(root)
-        expandAllRows()
-    }
-
     private fun expandAllRows() {
         var i = 0
         while (i < rowCount) { expandRow(i); i++ }
     }
 }
+
+// ── Cell renderer ─────────────────────────────────────────────────────────────
 
 private class EndpointTreeCellRenderer : ColoredTreeCellRenderer() {
 
@@ -137,15 +210,22 @@ private class EndpointTreeCellRenderer : ColoredTreeCellRenderer() {
             is EndpointNode -> {
                 val ep = obj.endpoint
                 append(ep.httpMethod.name.padEnd(7), SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, methodColor(ep.httpMethod)))
-                append(" ${ep.methodName}()", SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                val displayName = if (ep.controllerName != null) "${ep.methodName}()" else ep.methodName
+                append(" $displayName", SimpleTextAttributes.REGULAR_ATTRIBUTES)
                 if (ep.meta.analysisWarnings.isNotEmpty())
                     append(" ⚠", SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, JBColor.YELLOW))
+            }
+            is SavedRequestNode -> {
+                val req = obj.request
+                icon = if (req.isDefault) AllIcons.Actions.Execute else AllIcons.Actions.Edit
+                append(req.name, if (req.isDefault) SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES else SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                if (req.isDefault) append("  ★", SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, JBColor(Color(0xCC, 0xAA, 0x00), Color(0xFF, 0xDD, 0x55))))
             }
             is ControllerNode -> {
                 append(obj.name, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
                 append("  ${obj.endpoints.size}", SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, JBColor.GRAY))
             }
-            is String -> append(obj, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+            is String   -> append(obj, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
             is NoResults -> append("No endpoints found", SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, JBColor.GRAY))
         }
     }
