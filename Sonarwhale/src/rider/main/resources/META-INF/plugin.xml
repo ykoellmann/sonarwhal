@@ -1,0 +1,64 @@
+<idea-plugin require-restart="true">
+  <id>com.jetbrains.rider.plugins.sonarwhale</id>
+  <name>Sonarwhale</name>
+  <version>_PLACEHOLDER_</version>
+  <vendor email="" url="">Yannik Köllmann</vendor>
+  <idea-version since-build="_PLACEHOLDER_" until-build="_PLACEHOLDER_" />
+
+  <depends>com.intellij.modules.rider</depends>
+
+  <description>
+<![CDATA[
+<p><b>Sonarwhale</b> reads your API endpoints from OpenAPI/Swagger sources and makes them testable directly inside Rider.</p>
+<ul>
+  <li>Automatic endpoint discovery via OpenAPI/Swagger — no build required</li>
+  <li>Supports Server URL (auto-discovery), local file, or static import</li>
+  <li>Live updates on file changes and configurable refresh</li>
+  <li>Built-in HTTP client with request builder, params editor, and body editor</li>
+  <li>Multiple environments (dev / staging / prod)</li>
+  <li>Saved requests per endpoint</li>
+  <li>Postman Collection export</li>
+</ul>
+]]>
+  </description>
+
+  <extensions defaultExtensionNs="com.intellij">
+
+    <!-- Tool window shown at the bottom of Rider -->
+    <toolWindow
+        id="Sonarwhale"
+        anchor="bottom"
+        secondary="false"
+        icon="/icons/sonarwhale.svg"
+        factoryClass="com.sonarwhale.toolwindow.SonarwhaleToolWindowFactory"/>
+
+    <!-- Project-level service: holds the endpoint list, triggers OpenAPI fetches -->
+    <projectService serviceImplementation="com.sonarwhale.service.RouteIndexService"/>
+
+    <!-- Project-level service: manages environments and OpenAPI cache -->
+    <projectService serviceImplementation="com.sonarwhale.service.EnvironmentService"/>
+
+    <!-- Project-level service: persists base URL, saved requests, and param values -->
+    <projectService serviceImplementation="com.sonarwhale.SonarwhaleStateService"/>
+
+    <!-- Project-level service: renders gutter play-icons on C# endpoint methods -->
+    <projectService serviceImplementation="com.sonarwhale.gutter.SonarwhaleGutterService"/>
+
+    <!-- Project-level service: maps endpoint IDs to C# source file + line for navigation -->
+    <projectService serviceImplementation="com.sonarwhale.gutter.SourceLocationService"/>
+
+    <!-- Trigger initial OpenAPI fetch after project opens -->
+    <postStartupActivity implementation="com.sonarwhale.SonarwhaleStartupActivity"/>
+
+  </extensions>
+
+  <actions>
+    <action id="Sonarwhale.OpenInSonarwhale"
+            class="com.sonarwhale.actions.OpenInSonarwhaleAction"
+            text="Open in Sonarwhale"
+            description="Jump to this endpoint in the Sonarwhale tool window">
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+  </actions>
+
+</idea-plugin>

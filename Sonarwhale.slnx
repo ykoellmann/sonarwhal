@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Sonarwhale/src/dotnet/ReSharperPlugin.Sonarwhale.Tests/ReSharperPlugin.Sonarwhale.Tests.csproj" />
+  <Project Path="Sonarwhale/src/dotnet/ReSharperPlugin.Sonarwhale/ReSharperPlugin.Sonarwhale.csproj" />
+  <Project Path="Sonarwhale/src/dotnet/ReSharperPlugin.Sonarwhale/ReSharperPlugin.Sonarwhale.Rider.csproj" />
+</Solution>
