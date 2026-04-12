@@ -1,10 +1,12 @@
 package com.routex.toolwindow
 
+import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
+import com.routex.gutter.SourceLocationService
 import com.routex.model.ApiEndpoint
 import com.routex.model.AuthType
 import com.routex.model.HttpMethod
@@ -16,6 +18,7 @@ import java.awt.Font
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import javax.swing.JButton
 import javax.swing.JPanel
 
 class DetailPanel(private val project: Project) : JPanel(BorderLayout()) {
@@ -153,6 +156,22 @@ class DetailPanel(private val project: Project) : JPanel(BorderLayout()) {
                 })
             }
         }
+
+        // "Jump to source" button — only visible when a source location is known
+        val navBtn = JButton(AllIcons.Actions.EditSource).apply {
+            isBorderPainted    = false
+            isContentAreaFilled = false
+            toolTipText        = "Jump to source"
+            isVisible          = SourceLocationService.getInstance(project).canNavigate(endpoint.id)
+            addActionListener {
+                SourceLocationService.getInstance(project).navigate(endpoint.id)
+            }
+        }
+        panel.add(navBtn, GridBagConstraints().also {
+            it.gridx = 8; it.gridy = 0; it.weightx = 0.0
+            it.anchor = GridBagConstraints.EAST; it.insets = Insets(0, 4, 0, 0)
+        })
+
         return panel
     }
 

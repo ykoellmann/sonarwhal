@@ -41,8 +41,11 @@
     <!-- Project-level service: persists base URL, saved requests, and param values -->
     <projectService serviceImplementation="com.routex.RouteXStateService"/>
 
-    <!-- Project-level service: renders gutter play-icons on C# endpoint methods (Phase 4) -->
+    <!-- Project-level service: renders gutter play-icons on C# endpoint methods -->
     <projectService serviceImplementation="com.routex.gutter.RouteXGutterService"/>
+
+    <!-- Project-level service: maps endpoint IDs to C# source file + line for navigation -->
+    <projectService serviceImplementation="com.routex.gutter.SourceLocationService"/>
 
     <!-- Trigger initial OpenAPI fetch after project opens -->
     <postStartupActivity implementation="com.routex.RouteXStartupActivity"/>

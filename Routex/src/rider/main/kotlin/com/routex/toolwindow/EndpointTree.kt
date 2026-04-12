@@ -14,11 +14,14 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.treeStructure.Tree
 import com.routex.RouteXStateService
+import com.routex.gutter.SourceLocationService
 import com.routex.model.ApiEndpoint
 import com.routex.model.EndpointStatus
 import com.routex.model.HttpMethod
 import com.routex.model.SavedRequest
 import java.awt.Color
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.util.UUID
@@ -85,6 +88,21 @@ class EndpointTree(private val project: Project) : Tree() {
                 if (e.isPopupTrigger) handleMouse(e)
             }
         })
+
+        // F4 → Jump to Source (standard IntelliJ shortcut)
+        addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode == KeyEvent.VK_F4) {
+                    val node = lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
+                    val epId = when (val obj = node.userObject) {
+                        is EndpointNode -> obj.endpoint.id
+                        is RequestNode  -> obj.endpoint.id
+                        else            -> return
+                    }
+                    SourceLocationService.getInstance(project).navigate(epId)
+                }
+            }
+        })
     }
 
     // ── Mouse handling ────────────────────────────────────────────────────────
@@ -129,6 +147,16 @@ class EndpointTree(private val project: Project) : Tree() {
     }
 
     private fun buildEndpointMenu(group: DefaultActionGroup, endpoint: ApiEndpoint) {
+        val locService = SourceLocationService.getInstance(project)
+        if (locService.canNavigate(endpoint.id)) {
+            group.add(object : AnAction("Jump to Source", "Open the C# controller method in the editor", AllIcons.Actions.EditSource) {
+                override fun actionPerformed(e: AnActionEvent) {
+                    locService.navigate(endpoint.id)
+                }
+            })
+            group.add(Separator.getInstance())
+        }
+
         group.add(object : AnAction("New Request", "Create a new saved request for this endpoint", AllIcons.General.Add) {
             override fun actionPerformed(e: AnActionEvent) {
                 val name = Messages.showInputDialog(
@@ -263,6 +291,14 @@ class EndpointTree(private val project: Project) : Tree() {
 
     fun selectEndpoint(id: String): Boolean {
         val node = findEndpointNode(id) ?: return false
+        val path = javax.swing.tree.TreePath(node.path)
+        selectionPath = path
+        scrollPathToVisible(path)
+        return true
+    }
+
+    fun selectRequest(endpointId: String, requestId: String): Boolean {
+        val node = findRequestNode(endpointId, requestId) ?: return false
         val path = javax.swing.tree.TreePath(node.path)
         selectionPath = path
         scrollPathToVisible(path)

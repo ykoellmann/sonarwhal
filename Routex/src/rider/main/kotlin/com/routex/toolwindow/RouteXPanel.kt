@@ -13,6 +13,7 @@ import com.intellij.ui.SearchTextField
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.routex.model.ApiEndpoint
+import com.routex.RouteXStateService
 import com.routex.service.EnvironmentService
 import com.routex.service.RouteIndexService
 import java.awt.BorderLayout
@@ -85,10 +86,16 @@ class RouteXPanel(private val project: Project) : JPanel(BorderLayout()) {
             endpointTree.selectEndpoint(id)
         }
 
-        service.addRunRequestListener { endpointId, _ ->
-            endpointTree.selectEndpoint(endpointId)
+        service.addRunRequestListener { endpointId, requestId ->
             val endpoint = service.endpoints.firstOrNull { it.id == endpointId } ?: return@addRunRequestListener
-            detailPanel.showEndpoint(endpoint)
+            val request = RouteXStateService.getInstance(project).getRequest(endpointId, requestId)
+            if (request != null) {
+                endpointTree.selectRequest(endpointId, requestId)
+                detailPanel.showRequest(endpoint, request)
+            } else {
+                endpointTree.selectEndpoint(endpointId)
+                detailPanel.showEndpoint(endpoint)
+            }
         }
 
         searchField.getTextEditor().document.addDocumentListener(object : DocumentListener {
