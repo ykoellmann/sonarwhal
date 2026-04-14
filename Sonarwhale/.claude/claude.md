@@ -341,7 +341,7 @@ PsiManager.getInstance(project).addPsiTreeChangeListener(listener, disposable)
 **PSI-Discovery-Infrastruktur entfernt:**
 - [x] `ControllerVisitor.cs`, `MinimalApiVisitor.cs`, `EndpointDetector.cs` gelöscht
 - [x] `SonarwhaleHost.cs`, `SonarwhaleModel.Generated.cs`, `SonarwhaleDtos.cs` gelöscht
-- [x] `SonarwhaleModel.Generated.kt` (generiertes Kotlin-Protokoll-Modell) gelöscht
+- [x] `SonarwhaleModel.Generated.kt` (generiertes Kotlin-Protokoll-Modell) gelöscht — inkl. `SonarwhaleModel.Generated.cs` C#-Gegenstück
 - [x] `EndpointProvider.kt`, `EndpointProviderRegistry.kt`, `CSharpEndpointProvider.kt` gelöscht
 - [x] `providers/python/` — alle 7 Python PSI-Provider gelöscht
 - [x] `SonarwhaleService.kt` gelöscht (ersetzt durch `RouteIndexService`)
@@ -397,18 +397,29 @@ PsiManager.getInstance(project).addPsiTreeChangeListener(listener, disposable)
 - [ ] Diff-Tab im Detail-Panel
 - [ ] Breaking-Change-Badge am Tool Window Icon
 
-### Phase 4 — PSI-Navigation (optional)
+### Phase 4 — Gutter Icons & Jump-to-Source (Regex-based, kein PSI) ✅ ABGESCHLOSSEN
 
-- [ ] `psiNavigationTarget` befüllen: Route-String aus OpenAPI → C#-Datei:Zeile (via SonarwhaleSearcherFactory)
-- [ ] Gutter Icons werden dann automatisch aktiv (SonarwhaleGutterService bereits vorbereitet)
-- [ ] Jump-to-Definition: OpenAPI-Endpoint → passende Controller-Methode im Code
-- [ ] `OpenInSonarwhaleAction` wird vollständig funktional (psiNavigationTarget != null)
+- [x] `LanguageScanner` Interface + `ScanMatch` data class (`LanguageScanner.kt`)
+- [x] `CSharpScanner` — vollständiger ASP.NET Core Scanner (Attribute-Routing, Minimal API, AcceptVerbs, tilde-override, named-param fix)
+- [x] `SonarwhaleGutterService` — thin dispatcher, delegiert an registrierte `LanguageScanner`-Implementierungen
+- [x] `SourceLocationService` — on-demand Scan nutzt `isSupported(ext)` + `scanLines(lines, ext)` statt hardcoded `"cs"`
+- [x] Gutter Icons aktiv für alle registrierten Scanner-Sprachen
+- [x] Jump-to-Source: Endpoint → Controller-Methode (register + navigate)
+- [x] Klick-Aktion: öffnet Tool Window, führt Default-Request aus (oder selektiert Endpoint)
 
-### Phase 5 — Import/Export & Erweiterungen
+### Phase 5 — Weitere Sprachen & Erweiterungen
 
+**Language Scanner Infrastructure (Grundgerüst) ✅**
+- [x] `LanguageScanner` Interface — erweiterbar für beliebige Sprachen ohne Änderung am Core
+- [x] `CSharpScanner` — Referenz-Implementierung (ASP.NET Core)
+
+**Weitere Scanner (noch nicht implementiert):**
+- [ ] `PythonScanner` — FastAPI / Flask (`@app.get(...)`, `@router.post(...)`)
+- [ ] `JavaScanner` — Spring Boot (`@GetMapping`, `@RequestMapping`, `@RestController`)
+
+**Sonstiges:**
 - [ ] Auth für den Swagger-Endpunkt selbst (Header/Token beim Fetch)
-- [ ] Python Provider Navigation (FastAPI/Flask — JVM PSI für Jump-to-Definition)
-- [ ] Java Provider Navigation (Spring Boot)
+- [ ] Import/Export: Postman Collection Import
 
 ---
 

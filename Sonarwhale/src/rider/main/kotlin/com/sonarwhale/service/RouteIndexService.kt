@@ -25,6 +25,10 @@ class RouteIndexService(private val project: Project) : Disposable {
     private var cachedEndpoints: List<ApiEndpoint> = emptyList()
     private var fetchStatus: FetchStatus = FetchStatus.OK
 
+    /** The endpoint ID currently shown in the detail view (set by selectEndpoint / runRequest). */
+    @Volatile var currentEndpointId: String? = null
+        private set
+
     private val endpointListeners   = mutableListOf<(List<ApiEndpoint>) -> Unit>()
     private val loadingListeners    = mutableListOf<(Boolean) -> Unit>()
     private val statusListeners     = mutableListOf<(FetchStatus) -> Unit>()
@@ -141,13 +145,21 @@ class RouteIndexService(private val project: Project) : Disposable {
     // Selection & Run-Request (für Gutter Icons)
     // -------------------------------------------------------------------------
 
+    /** Updates the currently viewed endpoint ID without triggering any listener. Called by the
+     *  UI when the user selects an endpoint directly in the tree (not via gutter icon). */
+    fun setCurrentEndpoint(id: String?) {
+        currentEndpointId = id
+    }
+
     fun selectEndpoint(id: String) {
+        currentEndpointId = id
         ApplicationManager.getApplication().invokeLater {
             selectionListeners.toList().forEach { it(id) }
         }
     }
 
     fun runRequest(endpointId: String, requestId: String) {
+        currentEndpointId = endpointId
         ApplicationManager.getApplication().invokeLater {
             runRequestListeners.toList().forEach { it(endpointId, requestId) }
         }

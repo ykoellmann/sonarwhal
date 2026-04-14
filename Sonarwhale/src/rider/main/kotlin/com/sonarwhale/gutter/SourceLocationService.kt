@@ -22,6 +22,9 @@ import java.util.concurrent.ConcurrentHashMap
  *     files that have never been opened.
  *  3. [navigate] triggers an on-demand blocking scan as a last resort if the location is
  *     not yet cached.
+ *
+ * Supported file extensions are determined by [SonarwhaleGutterService.isSupported], which
+ * delegates to the registered [LanguageScanner] implementations.
  */
 @Service(Service.Level.PROJECT)
 class SourceLocationService(private val project: Project) {
@@ -57,11 +60,12 @@ class SourceLocationService(private val project: Project) {
                     val gutterService = SonarwhaleGutterService.getInstance(project)
                     ProjectFileIndex.getInstance(project).iterateContent { vFile ->
                         if (indicator.isCanceled) return@iterateContent false
-                        if (vFile.extension?.lowercase() == "cs") {
+                        val ext = vFile.extension?.lowercase()
+                        if (ext != null && gutterService.isSupported(ext)) {
                             try {
                                 val text  = String(vFile.contentsToByteArray(), vFile.charset)
                                 val lines = text.lines()
-                                for ((ep, line) in gutterService.scanLines(lines)) {
+                                for ((ep, line) in gutterService.scanLines(lines, ext)) {
                                     register(ep.id, vFile, line)
                                 }
                             } catch (_: Exception) {}

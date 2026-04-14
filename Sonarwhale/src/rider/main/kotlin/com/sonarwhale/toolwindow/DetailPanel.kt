@@ -11,6 +11,7 @@ import com.sonarwhale.model.ApiEndpoint
 import com.sonarwhale.model.AuthType
 import com.sonarwhale.model.HttpMethod
 import com.sonarwhale.model.SavedRequest
+import com.sonarwhale.service.RouteIndexService
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Color
@@ -18,8 +19,11 @@ import java.awt.Font
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import java.awt.event.KeyEvent
 import javax.swing.JButton
+import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.KeyStroke
 
 class DetailPanel(private val project: Project) : JPanel(BorderLayout()) {
 
@@ -53,6 +57,17 @@ class DetailPanel(private val project: Project) : JPanel(BorderLayout()) {
         add(headerHolder, BorderLayout.NORTH)
         add(cardPanel,    BorderLayout.CENTER)
         cardLayout.show(cardPanel, "empty")
+
+        // F4 → Jump to Source: reads current endpoint from the service (source of truth),
+        // so it works regardless of how the detail view was opened (tree, gutter icon, etc.)
+        val f4 = KeyStroke.getKeyStroke(KeyEvent.VK_F4, 0)
+        getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(f4, "jumpToSource")
+        actionMap.put("jumpToSource", object : javax.swing.AbstractAction() {
+            override fun actionPerformed(e: java.awt.event.ActionEvent) {
+                val epId = RouteIndexService.getInstance(project).currentEndpointId ?: return
+                SourceLocationService.getInstance(project).navigate(epId)
+            }
+        })
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -157,12 +172,12 @@ class DetailPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
         }
 
-        // "Jump to source" button — only visible when a source location is known
+        // "Jump to source" button — always shown; navigate() handles not-yet-cached locations
+        // via a blocking modal scan, so no need to gate on canNavigate() at build time.
         val navBtn = JButton(AllIcons.Actions.EditSource).apply {
             isBorderPainted    = false
             isContentAreaFilled = false
-            toolTipText        = "Jump to source"
-            isVisible          = SourceLocationService.getInstance(project).canNavigate(endpoint.id)
+            toolTipText        = "Jump to source (F4)"
             addActionListener {
                 SourceLocationService.getInstance(project).navigate(endpoint.id)
             }
