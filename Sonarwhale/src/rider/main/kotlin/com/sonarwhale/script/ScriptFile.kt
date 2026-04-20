@@ -8,6 +8,5 @@ enum class ScriptPhase { PRE, POST }
 data class ScriptFile(
     val level: ScriptLevel,
     val phase: ScriptPhase,
-    val path: Path,
-    val inheritOff: Boolean
+    val path: Path
 )
