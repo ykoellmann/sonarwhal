@@ -11,6 +11,7 @@ import com.sonarwhale.model.ApiEndpoint
 import com.sonarwhale.model.AuthType
 import com.sonarwhale.model.HttpMethod
 import com.sonarwhale.model.SavedRequest
+import com.sonarwhale.script.ScriptLevel
 import com.sonarwhale.service.RouteIndexService
 import java.awt.BorderLayout
 import java.awt.CardLayout
@@ -42,10 +43,12 @@ class DetailPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private val cardLayout      = CardLayout()
     private val controllerPanel = JPanel(BorderLayout())
+    private val folderCardHolder = JPanel(BorderLayout())
     private val cardPanel       = JPanel(cardLayout).also {
         it.add(emptyLabel,       "empty")
         it.add(splitter,         "content")
         it.add(controllerPanel,  "controller")
+        it.add(folderCardHolder, "folder")
     }
 
     private val headerHolder = JPanel(BorderLayout()).also { it.isVisible = false }
@@ -100,20 +103,21 @@ class DetailPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     fun showController(node: ControllerNode) {
+        showFolderPanel(ScriptLevel.TAG, tag = node.name)
+    }
+
+    fun showGlobal() {
+        showFolderPanel(ScriptLevel.GLOBAL)
+    }
+
+    private fun showFolderPanel(level: ScriptLevel, tag: String? = null) {
         headerHolder.isVisible = false
-        controllerPanel.removeAll()
-        controllerPanel.border = JBUI.Borders.empty(24)
-        val title = JBLabel(node.name).apply { font = font.deriveFont(Font.BOLD, 14f) }
-        val count = JBLabel("${node.endpoints.size} endpoint${if (node.endpoints.size == 1) "" else "s"}").apply {
-            foreground = JBColor.GRAY; font = font.deriveFont(12f)
-        }
-        val textPanel = JPanel(BorderLayout(0, 4)).also {
-            it.isOpaque = false
-            it.add(title, BorderLayout.NORTH)
-            it.add(count, BorderLayout.CENTER)
-        }
-        controllerPanel.add(textPanel, BorderLayout.NORTH)
-        cardLayout.show(cardPanel, "controller")
+        folderCardHolder.removeAll()
+        folderCardHolder.add(FolderScriptsPanel(project, level, tag,
+            onRefresh = { showFolderPanel(level, tag) }), BorderLayout.CENTER)
+        folderCardHolder.revalidate()
+        folderCardHolder.repaint()
+        cardLayout.show(cardPanel, "folder")
         revalidate(); repaint()
     }
 

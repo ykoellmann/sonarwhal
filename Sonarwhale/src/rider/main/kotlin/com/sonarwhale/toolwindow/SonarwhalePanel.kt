@@ -74,6 +74,11 @@ class SonarwhalePanel(private val project: Project) : JPanel(BorderLayout()) {
             detailPanel.showController(node)
         }
 
+        endpointTree.onGlobalSelected = {
+            service.setCurrentEndpoint(null)
+            detailPanel.showGlobal()
+        }
+
         endpointTree.onRequestSelected = { endpoint, request ->
             service.setCurrentEndpoint(endpoint.id)
             detailPanel.showRequest(endpoint, request)
