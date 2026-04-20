@@ -168,6 +168,7 @@ class ScriptEngine {
                 runCatching { fn.call(c, s, s, emptyArray()) }
                     .fold(
                         onSuccess = { returnVal ->
+                            // treat explicit `return false` (Rhino returns java.lang.Boolean false) as failure
                             val passed = returnVal != java.lang.Boolean.FALSE
                             TestResult(name, passed, if (passed) null else "Test function returned false")
                         },

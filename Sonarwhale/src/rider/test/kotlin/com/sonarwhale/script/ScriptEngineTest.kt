@@ -1,8 +1,5 @@
 package com.sonarwhale.script
 
-import com.sonarwhale.script.ConsoleEntry
-import com.sonarwhale.script.ConsoleOutput
-import com.sonarwhale.script.LogLevel
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -196,6 +193,7 @@ class ScriptEngineTest {
         val console = ConsoleOutput()
         engine().executeChain(listOf(script), ctx, console)
         val logs = console.entries.filterIsInstance<ConsoleEntry.LogEntry>()
+        assertEquals(1, logs.size)
         assertEquals(LogLevel.WARN, logs[0].level)
     }
 
