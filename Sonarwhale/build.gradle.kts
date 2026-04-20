@@ -57,7 +57,11 @@ sourceSets {
 }
 
 tasks.compileKotlin {
-    kotlinOptions { jvmTarget = "21" }
+    kotlinOptions { jvmTarget = "17" }
+}
+
+tasks.compileTestKotlin {
+    kotlinOptions { jvmTarget = "17" }
 }
 
 tasks.test {
