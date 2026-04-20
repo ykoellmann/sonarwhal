@@ -7,8 +7,12 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.JBColor
 import com.intellij.ui.SimpleTextAttributes
@@ -19,6 +23,9 @@ import com.sonarwhale.model.ApiEndpoint
 import com.sonarwhale.model.EndpointStatus
 import com.sonarwhale.model.HttpMethod
 import com.sonarwhale.model.SavedRequest
+import com.sonarwhale.script.ScriptLevel
+import com.sonarwhale.script.ScriptPhase
+import com.sonarwhale.script.SonarwhaleScriptService
 import java.awt.Color
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -47,6 +54,10 @@ class ControllerNode(val name: String, val endpoints: List<ApiEndpoint>) {
 
 object NoResults { override fun toString() = "No endpoints found" }
 
+object GlobalNode {
+    override fun toString() = "Global"
+}
+
 // ── Tree ──────────────────────────────────────────────────────────────────────
 
 class EndpointTree(private val project: Project) : Tree() {
@@ -55,6 +66,7 @@ class EndpointTree(private val project: Project) : Tree() {
     var onEndpointSelected:   ((ApiEndpoint) -> Unit)?              = null
     var onControllerSelected: ((ControllerNode) -> Unit)?           = null
     var onRequestSelected:    ((ApiEndpoint, SavedRequest) -> Unit)? = null
+    var onGlobalSelected: (() -> Unit)? = null
 
     private val stateService = SonarwhaleStateService.getInstance(project)
 
@@ -77,6 +89,7 @@ class EndpointTree(private val project: Project) : Tree() {
                 is EndpointNode   -> onEndpointSelected?.invoke(obj.endpoint)
                 is ControllerNode -> onControllerSelected?.invoke(obj)
                 is RequestNode    -> onRequestSelected?.invoke(obj.endpoint, obj.request)
+                is GlobalNode     -> onGlobalSelected?.invoke()
             }
         }
 
@@ -136,14 +149,67 @@ class EndpointTree(private val project: Project) : Tree() {
         val group = DefaultActionGroup()
 
         when (val obj = node.userObject) {
-            is EndpointNode -> buildEndpointMenu(group, obj.endpoint)
-            is RequestNode  -> buildRequestMenu(group, obj.endpoint, obj.request)
-            else            -> return
+            is GlobalNode     -> buildGlobalMenu(group)
+            is ControllerNode -> buildControllerMenu(group, obj)
+            is EndpointNode   -> buildEndpointMenu(group, obj.endpoint)
+            is RequestNode    -> buildRequestMenu(group, obj.endpoint, obj.request)
+            else              -> return
         }
 
         val popup = ActionManager.getInstance()
             .createActionPopupMenu(ActionPlaces.POPUP, group)
         popup.component.show(e.component, e.x, e.y)
+    }
+
+    private fun openOrCreateScriptInBackground(
+        phase: ScriptPhase,
+        level: ScriptLevel,
+        tag: String? = null,
+        endpoint: ApiEndpoint? = null,
+        request: SavedRequest? = null
+    ) {
+        val scriptService = SonarwhaleScriptService.getInstance(project)
+        ProgressManager.getInstance().run(
+            object : Task.Backgroundable(project, "Creating script…", false) {
+                override fun run(indicator: com.intellij.openapi.progress.ProgressIndicator) {
+                    val path = scriptService.getOrCreateScript(phase, level, tag, endpoint, request)
+                    val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path) ?: return
+                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                        FileEditorManager.getInstance(project).openFile(vf, true)
+                    }
+                }
+            }
+        )
+    }
+
+    private fun buildGlobalMenu(group: DefaultActionGroup) {
+        group.add(object : AnAction("Create Pre-Script (Global)",
+            "Create global pre.js that runs before every request", AllIcons.Actions.Edit) {
+            override fun actionPerformed(e: AnActionEvent) {
+                openOrCreateScriptInBackground(ScriptPhase.PRE, ScriptLevel.GLOBAL)
+            }
+        })
+        group.add(object : AnAction("Create Post-Script (Global)",
+            "Create global post.js that runs after every request", AllIcons.Actions.Edit) {
+            override fun actionPerformed(e: AnActionEvent) {
+                openOrCreateScriptInBackground(ScriptPhase.POST, ScriptLevel.GLOBAL)
+            }
+        })
+    }
+
+    private fun buildControllerMenu(group: DefaultActionGroup, node: ControllerNode) {
+        group.add(object : AnAction("Create Pre-Script (${node.name})",
+            "Create pre.js for this tag/controller", AllIcons.Actions.Edit) {
+            override fun actionPerformed(e: AnActionEvent) {
+                openOrCreateScriptInBackground(ScriptPhase.PRE, ScriptLevel.TAG, tag = node.name)
+            }
+        })
+        group.add(object : AnAction("Create Post-Script (${node.name})",
+            "Create post.js for this tag/controller", AllIcons.Actions.Edit) {
+            override fun actionPerformed(e: AnActionEvent) {
+                openOrCreateScriptInBackground(ScriptPhase.POST, ScriptLevel.TAG, tag = node.name)
+            }
+        })
     }
 
     private fun buildEndpointMenu(group: DefaultActionGroup, endpoint: ApiEndpoint) {
@@ -181,6 +247,22 @@ class EndpointTree(private val project: Project) : Tree() {
             override fun actionPerformed(e: AnActionEvent) {
                 val cb = java.awt.Toolkit.getDefaultToolkit().systemClipboard
                 cb.setContents(java.awt.datatransfer.StringSelection(endpoint.path), null)
+            }
+        })
+
+        group.add(Separator.getInstance())
+        group.add(object : AnAction("Create Pre-Script (Endpoint)",
+            "Create pre.js for this endpoint", AllIcons.Actions.Edit) {
+            override fun actionPerformed(e: AnActionEvent) {
+                openOrCreateScriptInBackground(ScriptPhase.PRE, ScriptLevel.ENDPOINT,
+                    tag = endpoint.tags.firstOrNull() ?: "Default", endpoint = endpoint)
+            }
+        })
+        group.add(object : AnAction("Create Post-Script (Endpoint)",
+            "Create post.js for this endpoint", AllIcons.Actions.Edit) {
+            override fun actionPerformed(e: AnActionEvent) {
+                openOrCreateScriptInBackground(ScriptPhase.POST, ScriptLevel.ENDPOINT,
+                    tag = endpoint.tags.firstOrNull() ?: "Default", endpoint = endpoint)
             }
         })
     }
@@ -233,6 +315,24 @@ class EndpointTree(private val project: Project) : Tree() {
                 cb.setContents(java.awt.datatransfer.StringSelection(endpoint.path), null)
             }
         })
+
+        group.add(Separator.getInstance())
+        group.add(object : AnAction("Create Pre-Script (Request)",
+            "Create pre.js for this specific request", AllIcons.Actions.Edit) {
+            override fun actionPerformed(e: AnActionEvent) {
+                openOrCreateScriptInBackground(ScriptPhase.PRE, ScriptLevel.REQUEST,
+                    tag = endpoint.tags.firstOrNull() ?: "Default",
+                    endpoint = endpoint, request = request)
+            }
+        })
+        group.add(object : AnAction("Create Post-Script (Request)",
+            "Create post.js for this specific request", AllIcons.Actions.Edit) {
+            override fun actionPerformed(e: AnActionEvent) {
+                openOrCreateScriptInBackground(ScriptPhase.POST, ScriptLevel.REQUEST,
+                    tag = endpoint.tags.firstOrNull() ?: "Default",
+                    endpoint = endpoint, request = request)
+            }
+        })
     }
 
     // ── Tree building ─────────────────────────────────────────────────────────
@@ -265,9 +365,10 @@ class EndpointTree(private val project: Project) : Tree() {
 
     private fun rebuildTree() {
         val root = DefaultMutableTreeNode("root")
+        val globalNode = DefaultMutableTreeNode(GlobalNode)
 
         if (currentEndpoints.isEmpty()) {
-            root.add(DefaultMutableTreeNode(NoResults))
+            globalNode.add(DefaultMutableTreeNode(NoResults))
         } else {
             val grouped = currentEndpoints.groupBy { it.tags.firstOrNull() ?: "Endpoints" }
             for ((tag, eps) in grouped.entries.sortedBy { it.key }) {
@@ -279,10 +380,11 @@ class EndpointTree(private val project: Project) : Tree() {
                     }
                     ctrlNode.add(epNode)
                 }
-                root.add(ctrlNode)
+                globalNode.add(ctrlNode)
             }
         }
 
+        root.add(globalNode)
         model = DefaultTreeModel(root)
         expandAllRows()
     }
@@ -385,6 +487,10 @@ private class EndpointTreeCellRenderer : ColoredTreeCellRenderer() {
                     append("  default", SimpleTextAttributes(SimpleTextAttributes.STYLE_SMALLER, JBColor.GRAY))
                 }
                 icon = AllIcons.Nodes.Tag
+            }
+            is GlobalNode -> {
+                append("Global", SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+                icon = AllIcons.Nodes.Package
             }
             is ControllerNode -> {
                 append(obj.name, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
