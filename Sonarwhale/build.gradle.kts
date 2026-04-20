@@ -85,6 +85,7 @@ dependencies {
     }
     implementation("org.mozilla:rhino:1.7.15")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.3")
+    testImplementation("com.google.code.gson:gson:2.11.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
