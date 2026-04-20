@@ -1,14 +1,9 @@
 import org.apache.tools.ant.taskdefs.condition.Os
-import org.jetbrains.intellij.platform.gradle.Constants
-import org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask
-import org.jetbrains.intellij.platform.gradle.tasks.RunIdeTask
-
-import org.jetbrains.intellij.platform.gradle.tasks.aware.SplitModeAware
 
 plugins {
     id("java")
     alias(libs.plugins.kotlinJvm)
-    id("org.jetbrains.intellij.platform") version "2.10.4"     // See https://github.com/JetBrains/intellij-platform-gradle-plugin/releases
+    id("org.jetbrains.intellij.platform") version "2.10.4"
     id("me.filippov.gradle.jvm.wrapper") version "0.14.0"
 }
 
@@ -64,7 +59,6 @@ tasks.buildPlugin {
             into("${rootDir}/output")
         }
 
-        // TODO: See also org.jetbrains.changelog: https://github.com/JetBrains/gradle-changelog-plugin
         val changelogText = file("${rootDir}/CHANGELOG.md").readText()
         val changelogMatches = Regex("(?s)(-.+?)(?=##|$)").findAll(changelogText)
         val changeNotes = changelogMatches.map {
@@ -77,44 +71,37 @@ dependencies {
     intellijPlatform {
         rider(ProductVersion, useInstaller = false)
         jetbrainsRuntime()
-        // Python Community Edition — installed in every sandbox; active in runIdePython
-        plugin("PythonCore:${PythonPluginVersion}")
     }
 }
 
-// Disable the generic runIde — use the language-specific configs below instead
-tasks.runIde {
-    enabled = false
-}
-
 // ---------------------------------------------------------------------------
-// Helper: register a named run configuration for a given language.
-//
-// Each task points at the same sandbox that prepareSandbox fills, so the
-// Sonarwhale plugin (and PythonCore) are always present without any extra
-// copying. State isolation (recent projects, IDE settings) can be added later
-// via explicit idea.config.path / idea.system.path JVM args if needed.
+// Language-specific run configurations via the official testing extension.
+// Each gets its own prepareSandbox_* task with correct plugin wiring.
 // ---------------------------------------------------------------------------
-fun registerLanguageRunConfig(label: String) {
-    val mainSandboxDir = tasks.named<PrepareSandboxTask>(Constants.Tasks.PREPARE_SANDBOX)
-        .flatMap { it.sandboxDirectory }
-
-    tasks.register<RunIdeTask>("runIde$label") {
-        description = "Run Rider for $label projects"
-        dependsOn(Constants.Tasks.PREPARE_SANDBOX)
-        sandboxDirectory.set(mainSandboxDir)
-        splitMode.set(false)
-        splitModeTarget.set(SplitModeAware.SplitModeTarget.BACKEND)
-        maxHeapSize = "1500m"
+intellijPlatformTesting {
+    runIde {
+        register("runIdeCSharp") {
+            task {
+                maxHeapSize = "1500m"
+            }
+        }
+        register("runIdeJava") {
+            task {
+                maxHeapSize = "1500m"
+            }
+        }
+        register("runIdePython") {
+            task {
+                maxHeapSize = "1500m"
+            }
+            plugins {
+                plugin("PythonCore:${PythonPluginVersion}")
+            }
+        }
     }
 }
-
-registerLanguageRunConfig("CSharp")   // C# — built into Rider
-registerLanguageRunConfig("Java")     // Java — built into Rider
-registerLanguageRunConfig("Python")   // Python — via PythonCore plugin
 
 tasks.patchPluginXml {
-    // TODO: See also org.jetbrains.changelog: https://github.com/JetBrains/gradle-changelog-plugin
     val changelogText = file("${rootDir}/CHANGELOG.md").readText()
     val changelogMatches = Regex("(?s)(-.+?)(?=##|\$)").findAll(changelogText)
 
