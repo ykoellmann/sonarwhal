@@ -51,10 +51,17 @@ sourceSets {
         kotlin.srcDir("src/rider/main/kotlin")
         resources.srcDir("src/rider/main/resources")
     }
+    test {
+        kotlin.srcDir("src/rider/test/kotlin")
+    }
 }
 
 tasks.compileKotlin {
     kotlinOptions { jvmTarget = "21" }
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.buildPlugin {
@@ -80,6 +87,9 @@ dependencies {
         // Python Community Edition — installed in every sandbox; active in runIdePython
         plugin("PythonCore:${PythonPluginVersion}")
     }
+    implementation("org.mozilla:rhino:1.7.15")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.3")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 // Disable the generic runIde — use the language-specific configs below instead
