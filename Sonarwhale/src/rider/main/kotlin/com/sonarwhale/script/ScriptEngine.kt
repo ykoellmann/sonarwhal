@@ -19,6 +19,10 @@ import kotlin.io.path.readText
  */
 class ScriptEngine {
 
+    private val httpClient: HttpClient by lazy {
+        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+    }
+
     fun executeChain(scripts: List<ScriptFile>, context: ScriptContext) {
         if (scripts.isEmpty()) return
 
@@ -136,7 +140,11 @@ class ScriptEngine {
             } else {
                 runCatching { fn.call(c, s, s, emptyArray()) }
                     .fold(
-                        onSuccess = { TestResult(name, true, null) },
+                        onSuccess = { returnVal ->
+                            // treat explicit `return false` (Rhino returns java.lang.Boolean false) as failure
+                            val passed = returnVal != java.lang.Boolean.FALSE
+                            TestResult(name, passed, if (passed) null else "Test function returned false")
+                        },
                         onFailure = { e -> TestResult(name, false, e.message ?: e.javaClass.simpleName) }
                     )
             }
@@ -193,9 +201,9 @@ class ScriptEngine {
         url: String,
         body: String?,
         headers: Map<String, String>
-    ): NativeObject? {
+    ): NativeObject {
         return runCatching {
-            val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+            val client = httpClient
             val builder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(30))
@@ -206,21 +214,34 @@ class ScriptEngine {
                 HttpRequest.BodyPublishers.noBody()
             builder.method(method, publisher)
             val response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+            buildResponseObject(cx, scope, response.statusCode(), response.headers().map().mapValues { (_, vs) -> vs.firstOrNull() ?: "" }, response.body())
+        }.getOrElse { e ->
+            buildErrorResponseObject(cx, scope, e)
+        }
+    }
 
-            val resObj = NativeObject()
-            resObj.put("status", resObj, response.statusCode())
-            resObj.put("body", resObj, response.body())
-            val respHeaders = NativeObject()
-            response.headers().map().forEach { (k, vs) ->
-                if (vs.isNotEmpty()) respHeaders.put(k, respHeaders, vs[0])
-            }
-            resObj.put("headers", resObj, respHeaders)
-            resObj.put("json", resObj, rhinoFn { c, s, _ ->
-                runCatching { c.evaluateString(s, "(${response.body()})", "json-parse", 1, null) }
-                    .getOrDefault(null)
-            })
-            resObj
-        }.getOrNull()
+    private fun buildResponseObject(cx: Context, scope: Scriptable, status: Int, headers: Map<String, String>, responseBody: String): NativeObject {
+        val resObj = NativeObject()
+        resObj.put("status", resObj, status)
+        resObj.put("body", resObj, responseBody)
+        val respHeaders = NativeObject()
+        headers.forEach { (k, v) -> respHeaders.put(k, respHeaders, v) }
+        resObj.put("headers", resObj, respHeaders)
+        resObj.put("json", resObj, rhinoFn { c, s, _ ->
+            runCatching { c.evaluateString(s, "($responseBody)", "json-parse", 1, null) }
+                .getOrDefault(null)
+        })
+        return resObj
+    }
+
+    private fun buildErrorResponseObject(cx: Context, scope: Scriptable, e: Throwable): NativeObject {
+        val resObj = NativeObject()
+        resObj.put("status", resObj, 0)
+        resObj.put("body", resObj, "")
+        resObj.put("error", resObj, e.message ?: e.javaClass.simpleName)
+        resObj.put("headers", resObj, NativeObject())
+        resObj.put("json", resObj, rhinoFn { _, _, _ -> null })
+        return resObj
     }
 
     /** Convenience: create a Rhino callable from a Kotlin lambda. */

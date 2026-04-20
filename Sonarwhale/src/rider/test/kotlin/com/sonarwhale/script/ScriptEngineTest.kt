@@ -143,4 +143,34 @@ class ScriptEngineTest {
         assertEquals("1", ctx.envSnapshot["x"])
         assertTrue(ctx.testResults.isEmpty())
     }
+
+    @Test
+    fun `sw expect toBe passes when values equal`() {
+        val ctx = ctx()
+        val script = scriptFile("post.js", """sw.expect(42).toBe(42);""")
+        engine().executeChain(listOf(script), ctx)
+        assertEquals(1, ctx.testResults.size)
+        assertTrue(ctx.testResults[0].passed)
+    }
+
+    @Test
+    fun `sw expect toContain fails when string does not contain substr`() {
+        val ctx = ctx()
+        val script = scriptFile("post.js", """sw.expect("hello world").toContain("xyz");""")
+        engine().executeChain(listOf(script), ctx)
+        assertEquals(1, ctx.testResults.size)
+        assertFalse(ctx.testResults[0].passed)
+        assertNotNull(ctx.testResults[0].error)
+    }
+
+    @Test
+    fun `sw test return false is treated as failure`() {
+        val ctx = ctx()
+        val script = scriptFile("post.js", """
+            sw.test("should fail", function() { return false; });
+        """.trimIndent())
+        engine().executeChain(listOf(script), ctx)
+        assertEquals(1, ctx.testResults.size)
+        assertFalse(ctx.testResults[0].passed)
+    }
 }
