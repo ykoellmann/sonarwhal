@@ -19,6 +19,7 @@ import com.sonarwhale.model.AuthType
 import com.sonarwhale.model.toJsonTemplate
 import com.sonarwhale.model.ParameterLocation
 import com.sonarwhale.model.SavedRequest
+import com.sonarwhale.script.ConsoleOutput
 import com.sonarwhale.script.ScriptLevel
 import com.sonarwhale.script.ScriptPhase
 import com.sonarwhale.script.SonarwhaleScriptService
@@ -62,12 +63,12 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         toolTipText = "Mark as default (run by gutter icon)"
         isFocusable = false
     }
-    private val preScriptButton = JButton("⚡ Pre").apply {
+    private val preScriptButton = JButton("Pre").apply {
         font = font.deriveFont(10f)
         toolTipText = "Create or open pre-script for this request"
         isFocusable = false
     }
-    private val postScriptButton = JButton("⚡ Post").apply {
+    private val postScriptButton = JButton("Post").apply {
         font = font.deriveFont(10f)
         toolTipText = "Create or open post-script for this request"
         isFocusable = false
@@ -103,6 +104,7 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
     /** Called when the default state changes (true = is now default). */
     var onDefaultStateChanged: ((Boolean) -> Unit)? = null
     var onTestResultsReceived: ((List<TestResult>) -> Unit)? = null
+    var onConsoleReceived: ((List<com.sonarwhale.script.ConsoleEntry>) -> Unit)? = null
 
     /** Called by DetailPanel when the user edits the name field in the header. */
     fun setRequestName(name: String) { currentRequestName = name }
@@ -418,6 +420,7 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val savedRequest = currentRequest ?: SavedRequest(name = currentRequestName)
         val scriptService = SonarwhaleScriptService.getInstance(project)
+        val consoleOutput = ConsoleOutput()
 
         object : SwingWorker<Triple<Int, String, Long>, Unit>() {
             private var testResults: List<TestResult> = emptyList()
@@ -435,7 +438,8 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
                     request  = savedRequest,
                     url      = rawUrl,
                     headers  = initialHeaders,
-                    body     = initialBody
+                    body     = initialBody,
+                    console  = consoleOutput
                 )
                 scriptContext = ctx
 
@@ -506,7 +510,8 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
                     statusCode      = response.statusCode(),
                     responseHeaders = responseHeaders,
                     responseBody    = response.body(),
-                    scriptContext   = ctx
+                    scriptContext   = ctx,
+                    console         = consoleOutput
                 )
 
                 return Triple(response.statusCode(), response.body(), duration)
@@ -518,6 +523,7 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
                     val (status, body, duration) = get()
                     onResponseReceived?.invoke(status, body, duration)
                     onTestResultsReceived?.invoke(testResults)
+                    onConsoleReceived?.invoke(consoleOutput.entries)
                 }.onFailure { e ->
                     onResponseReceived?.invoke(0, describeError(e), 0)
                     onTestResultsReceived?.invoke(emptyList())
