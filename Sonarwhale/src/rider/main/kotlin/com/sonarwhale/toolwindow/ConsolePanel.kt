@@ -9,11 +9,18 @@ import com.sonarwhale.script.LogLevel
 import com.sonarwhale.script.ScriptPhase
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Cursor
+import java.awt.Dimension
 import java.awt.Font
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.awt.event.MouseMotionAdapter
 import java.text.SimpleDateFormat
 import java.util.Date
+import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JPanel
+import javax.swing.JTextArea
 import javax.swing.SwingUtilities
 import javax.swing.text.SimpleAttributeSet
 import javax.swing.text.StyleConstants
@@ -30,6 +37,36 @@ class ConsolePanel : JPanel(BorderLayout()) {
     private val timeFmt = SimpleDateFormat("HH:mm:ss.SSS")
     private val doc get() = textPane.styledDocument
 
+    private data class HttpEntryTracker(
+        val summaryStart: Int,
+        val summaryEnd: Int,
+        val shell: CollapsibleShell
+    )
+    private val httpTrackers = mutableListOf<HttpEntryTracker>()
+
+    private inner class CollapsibleShell(val inner: JPanel) : JPanel(BorderLayout()) {
+        var expanded = false
+            private set
+
+        init { isOpaque = false }
+
+        override fun getPreferredSize(): Dimension {
+            val w = (parent?.width ?: textPane.width).coerceAtLeast(200)
+            return if (expanded) Dimension(w, super.getPreferredSize().height)
+                   else Dimension(w, 0)
+        }
+        override fun getMinimumSize() = preferredSize
+        override fun getMaximumSize() = Dimension(Int.MAX_VALUE, if (expanded) Int.MAX_VALUE else 0)
+
+        fun toggle() {
+            expanded = !expanded
+            removeAll()
+            if (expanded) add(inner, BorderLayout.CENTER)
+            revalidate(); repaint()
+            textPane.revalidate(); textPane.repaint()
+        }
+    }
+
     init {
         val header = JPanel(BorderLayout(4, 0))
         header.border = JBUI.Borders.compound(
@@ -45,10 +82,27 @@ class ConsolePanel : JPanel(BorderLayout()) {
         add(scroll, BorderLayout.CENTER)
 
         clearButton.addActionListener { showEntries(emptyList()) }
+
+        textPane.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                val pos = textPane.viewToModel2D(e.point).toInt()
+                httpTrackers.firstOrNull { pos in it.summaryStart until it.summaryEnd }
+                    ?.shell?.toggle()
+            }
+        })
+        textPane.addMouseMotionListener(object : MouseMotionAdapter() {
+            override fun mouseMoved(e: MouseEvent) {
+                val pos = textPane.viewToModel2D(e.point).toInt()
+                val onSummary = httpTrackers.any { pos in it.summaryStart until it.summaryEnd }
+                textPane.cursor = if (onSummary) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                                  else Cursor.getDefaultCursor()
+            }
+        })
     }
 
     fun showEntries(entries: List<ConsoleEntry>) {
         doc.remove(0, doc.length)
+        httpTrackers.clear()
         entries.forEach { appendEntry(it) }
         SwingUtilities.invokeLater {
             scroll.verticalScrollBar.let { it.value = it.maximum }
@@ -100,16 +154,44 @@ class ConsolePanel : JPanel(BorderLayout()) {
             else                     -> JBColor(Color(0xCC, 0x77, 0x00), Color(0xFF, 0xBB, 0x33))
         }
         val statusText = if (entry.status == 0) "ERROR" else "${entry.status}"
-        insert(
-            "→  ${entry.method}  ${entry.url}  ·  $statusText  ·  ${entry.durationMs}ms\n",
-            fg = statusColor, bold = true
-        )
 
-        val indent = "   "
+        val summaryStart = doc.length
+        insert("▶  ${entry.method}  ${entry.url}  ·  $statusText  ·  ${entry.durationMs}ms", fg = statusColor, bold = true)
+        val summaryEnd = doc.length
+        insert("\n", fg = JBColor.foreground())
+
+        val details = buildHttpDetails(entry)
+        val shell = CollapsibleShell(details)
+        httpTrackers.add(HttpEntryTracker(summaryStart, summaryEnd, shell))
+
+        textPane.setCaretPosition(doc.length)
+        textPane.insertComponent(shell)
+        doc.insertString(doc.length, "\n", null)
+    }
+
+    private fun buildHttpDetails(entry: ConsoleEntry.HttpEntry): JPanel {
+        val panel = JPanel()
+        panel.layout = BoxLayout(panel, BoxLayout.Y_AXIS)
+        panel.border = JBUI.Borders.emptyLeft(16)
+        panel.isOpaque = false
+
         fun section(title: String, content: String) {
             if (content.isBlank()) return
-            insert("$indent$title\n", fg = JBColor.GRAY, bold = true, size = 10)
-            insert(content.lines().joinToString("\n") { "$indent$it" } + "\n", fg = JBColor.foreground())
+            panel.add(JBLabel(title).apply {
+                font = font.deriveFont(Font.BOLD, 10f)
+                foreground = JBColor.GRAY
+                border = JBUI.Borders.emptyTop(4)
+                alignmentX = LEFT_ALIGNMENT
+            })
+            panel.add(JTextArea(content).apply {
+                isEditable = false
+                font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+                lineWrap = true
+                wrapStyleWord = false
+                border = JBUI.Borders.empty(2, 4)
+                background = JBColor.background()
+                alignmentX = LEFT_ALIGNMENT
+            })
         }
 
         val reqHeadersText = entry.requestHeaders.entries.joinToString("\n") { "${it.key}: ${it.value}" }
@@ -123,7 +205,8 @@ class ConsolePanel : JPanel(BorderLayout()) {
             section("RESPONSE HEADERS", respHeadersText)
             if (entry.responseBody.isNotBlank()) section("RESPONSE BODY", entry.responseBody.take(2000))
         }
-        insert("\n", fg = JBColor.foreground())
+
+        return panel
     }
 
     private fun insert(
