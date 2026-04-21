@@ -1,5 +1,6 @@
 package com.sonarwhale.toolwindow
 
+import com.intellij.icons.AllIcons
 import com.intellij.ide.scratch.ScratchRootType
 import com.intellij.lang.Language
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -13,10 +14,13 @@ import com.sonarwhale.script.ConsoleEntry
 import com.sonarwhale.script.TestResult
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Cursor
 import java.awt.Font
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JPanel
@@ -39,12 +43,9 @@ class ResponsePanel(private val project: Project) : JPanel(BorderLayout()) {
         isVisible = false
         toolTipText = "Open response in a new editor tab with JSON highlighting"
     }
-    private val collapseButton = JButton("▼").apply {
-        font = font.deriveFont(10f)
-        isBorderPainted = false
-        isContentAreaFilled = false
+    private val collapseIcon = JBLabel(AllIcons.General.ArrowDown).apply {
         toolTipText = "Collapse response panel"
-        isFocusable = false
+        border = JBUI.Borders.empty(0, 4, 0, 0)
     }
     private val bodyArea = JTextArea().apply {
         isEditable = false
@@ -64,6 +65,16 @@ class ResponsePanel(private val project: Project) : JPanel(BorderLayout()) {
     var isContentVisible: Boolean = true
         private set
 
+    private fun toggleCollapse() {
+        isContentVisible = !isContentVisible
+        tabs.isVisible = isContentVisible
+        collapseIcon.icon = if (isContentVisible) AllIcons.General.ArrowDown else AllIcons.General.ArrowUp
+        collapseIcon.toolTipText = if (isContentVisible) "Collapse response panel" else "Expand response panel"
+        minimumSize = if (isContentVisible) null else java.awt.Dimension(0, 36)
+        revalidate(); repaint()
+        onToggle?.invoke()
+    }
+
     init {
         val header = JPanel(GridBagLayout())
         header.border = JBUI.Borders.compound(
@@ -78,7 +89,8 @@ class ResponsePanel(private val project: Project) : JPanel(BorderLayout()) {
         header.add(statusLabel, gbc)
 
         gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL
-        header.add(JPanel().also { it.isOpaque = false }, gbc)
+        val spacer = JPanel().also { it.isOpaque = false }
+        header.add(spacer, gbc)
 
         gbc.gridx = 2; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE
         gbc.insets = Insets(0, 0, 0, 8)
@@ -88,7 +100,7 @@ class ResponsePanel(private val project: Project) : JPanel(BorderLayout()) {
         header.add(openButton, gbc)
 
         gbc.gridx = 4; gbc.insets = Insets(0, 4, 0, 0)
-        header.add(collapseButton, gbc)
+        header.add(collapseIcon, gbc)
 
         add(header, BorderLayout.NORTH)
         tabs.addTab("Body", bodyScroll)
@@ -97,15 +109,15 @@ class ResponsePanel(private val project: Project) : JPanel(BorderLayout()) {
         add(tabs, BorderLayout.CENTER)
 
         openButton.addActionListener { openInEditor() }
-        collapseButton.addActionListener {
-            isContentVisible = !isContentVisible
-            tabs.isVisible = isContentVisible
-            collapseButton.text = if (isContentVisible) "▼" else "▲"
-            collapseButton.toolTipText = if (isContentVisible) "Collapse response panel" else "Expand response panel"
-            minimumSize = if (isContentVisible) null else java.awt.Dimension(0, 36)
-            revalidate(); repaint()
-            onToggle?.invoke()
+
+        val handCursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        val clickHandler = object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) = toggleCollapse()
         }
+        // Make the entire header area clickable — attach to header and all non-button children.
+        // openButton handles its own click and is intentionally excluded.
+        listOf<java.awt.Component>(header, statusLabel, durationLabel, spacer, collapseIcon)
+            .forEach { it.addMouseListener(clickHandler); it.cursor = handCursor }
     }
 
     fun showResponse(statusCode: Int, body: String, durationMs: Long) {
