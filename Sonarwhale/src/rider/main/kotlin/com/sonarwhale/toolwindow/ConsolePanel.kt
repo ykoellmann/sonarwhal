@@ -9,7 +9,6 @@ import com.sonarwhale.script.LogLevel
 import com.sonarwhale.script.ScriptPhase
 import java.awt.BorderLayout
 import java.awt.Color
-import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -61,26 +60,22 @@ class ConsolePanel : JPanel(BorderLayout()) {
         }
     }
 
-    private fun buildRow(entry: ConsoleEntry): JPanel = when (entry) {
+    private fun buildRow(entry: ConsoleEntry): java.awt.Component = when (entry) {
         is ConsoleEntry.ScriptBoundary -> buildBoundaryRow(entry)
         is ConsoleEntry.LogEntry       -> buildLogRow(entry)
         is ConsoleEntry.ErrorEntry     -> buildErrorRow(entry)
         is ConsoleEntry.HttpEntry      -> buildHttpRow(entry)
     }
 
-    private fun buildBoundaryRow(entry: ConsoleEntry.ScriptBoundary): JPanel {
-        val row = JPanel(FlowLayout(FlowLayout.LEFT, 4, 1)).also { it.isOpaque = false }
+    // ── Row builders ──────────────────────────────────────────────────────────
+
+    private fun buildBoundaryRow(entry: ConsoleEntry.ScriptBoundary): JTextArea {
         val phase = if (entry.phase == ScriptPhase.PRE) "pre" else "post"
         val name  = entry.scriptPath.substringAfterLast('/').substringAfterLast('\\')
-        row.add(JBLabel("▶ $name [$phase]").apply {
-            font = font.deriveFont(Font.ITALIC, 10f)
-            foreground = JBColor.GRAY
-        })
-        return row
+        return textRow("▶  $name [$phase]", JBColor.GRAY, italic = true)
     }
 
-    private fun buildLogRow(entry: ConsoleEntry.LogEntry): JPanel {
-        val row = JPanel(FlowLayout(FlowLayout.LEFT, 4, 1)).also { it.isOpaque = false }
+    private fun buildLogRow(entry: ConsoleEntry.LogEntry): JTextArea {
         val color = when (entry.level) {
             LogLevel.LOG   -> JBColor.foreground()
             LogLevel.WARN  -> JBColor(Color(0xCC, 0x77, 0x00), Color(0xFF, 0xBB, 0x33))
@@ -88,29 +83,20 @@ class ConsolePanel : JPanel(BorderLayout()) {
         }
         val prefix = when (entry.level) {
             LogLevel.LOG   -> ""
-            LogLevel.WARN  -> "⚠ "
-            LogLevel.ERROR -> "✕ "
+            LogLevel.WARN  -> "⚠  "
+            LogLevel.ERROR -> "✕  "
         }
-        row.add(JBLabel(timeFmt.format(Date(entry.timestampMs))).apply {
-            font = font.deriveFont(Font.PLAIN, 10f)
-            foreground = JBColor.GRAY
-        })
-        row.add(JBLabel("$prefix${entry.message}").apply {
-            font = font.deriveFont(Font.PLAIN, 11f)
-            foreground = color
-        })
-        return row
+        val time = timeFmt.format(Date(entry.timestampMs))
+        return textRow("$time  $prefix${entry.message}", color)
     }
 
-    private fun buildErrorRow(entry: ConsoleEntry.ErrorEntry): JPanel {
-        val row = JPanel(FlowLayout(FlowLayout.LEFT, 4, 1))
-        row.background = JBColor(Color(0xFF, 0xEE, 0xEE), Color(0x55, 0x22, 0x22))
+    private fun buildErrorRow(entry: ConsoleEntry.ErrorEntry): JTextArea {
         val name = entry.scriptPath.substringAfterLast('/').substringAfterLast('\\')
-        row.add(JBLabel("✕ $name: ${entry.message}").apply {
-            font = font.deriveFont(Font.PLAIN, 11f)
-            foreground = JBColor(Color(0xCC, 0x00, 0x00), Color(0xFF, 0x55, 0x55))
-        })
-        return row
+        return textRow("✕  $name: ${entry.message}",
+            JBColor(Color(0xCC, 0x00, 0x00), Color(0xFF, 0x55, 0x55))).also {
+            it.background = JBColor(Color(0xFF, 0xEE, 0xEE), Color(0x55, 0x22, 0x22))
+            it.isOpaque = true
+        }
     }
 
     private fun buildHttpRow(entry: ConsoleEntry.HttpEntry): JPanel {
@@ -118,8 +104,6 @@ class ConsolePanel : JPanel(BorderLayout()) {
         container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
         container.isOpaque = false
 
-        // One-line summary — clickable to expand
-        val summary = JPanel(FlowLayout(FlowLayout.LEFT, 4, 1)).also { it.isOpaque = false }
         val statusColor = when {
             entry.status in 200..299 -> JBColor(Color(0x00, 0xAA, 0x55), Color(0x44, 0xCC, 0x77))
             entry.status == 0        -> JBColor(Color(0xCC, 0x00, 0x00), Color(0xFF, 0x44, 0x44))
@@ -127,23 +111,11 @@ class ConsolePanel : JPanel(BorderLayout()) {
             else                     -> JBColor(Color(0xCC, 0x77, 0x00), Color(0xFF, 0xBB, 0x33))
         }
         val statusText = if (entry.status == 0) "ERROR" else "${entry.status}"
-        summary.add(JBLabel("→").apply { foreground = JBColor.GRAY })
-        summary.add(JBLabel(entry.method).apply {
-            font = font.deriveFont(Font.BOLD, 11f)
-        })
-        summary.add(JBLabel(entry.url).apply {
-            foreground = JBColor.GRAY
-            font = font.deriveFont(Font.PLAIN, 11f)
-        })
-        summary.add(JBLabel("·").apply { foreground = JBColor.GRAY })
-        summary.add(JBLabel(statusText).apply { foreground = statusColor; font = font.deriveFont(Font.BOLD, 11f) })
-        summary.add(JBLabel("·").apply { foreground = JBColor.GRAY })
-        summary.add(JBLabel("${entry.durationMs}ms").apply {
-            foreground = JBColor.GRAY
-            font = font.deriveFont(Font.PLAIN, 11f)
-        })
+        val summary = textRow(
+            "→  ${entry.method}  ${entry.url}  ·  $statusText  ·  ${entry.durationMs}ms",
+            statusColor
+        )
 
-        // Expandable details (hidden by default)
         val details = buildHttpDetails(entry)
         details.isVisible = false
 
@@ -199,4 +171,20 @@ class ConsolePanel : JPanel(BorderLayout()) {
 
         return panel
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun textRow(text: String, fg: java.awt.Color, italic: Boolean = false): JTextArea =
+        JTextArea(text).apply {
+            isEditable    = false
+            isOpaque      = false
+            lineWrap      = true
+            wrapStyleWord = true
+            foreground    = fg
+            font          = if (italic)
+                Font(Font.MONOSPACED, Font.ITALIC, 11)
+            else
+                Font(Font.MONOSPACED, Font.PLAIN, 11)
+            border        = JBUI.Borders.empty(1, 4)
+        }
 }
