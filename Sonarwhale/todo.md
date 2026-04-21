@@ -1,0 +1,5 @@
+ - Open response in Json / HTML / ...
+ - Script debugging
+   - Line numbers in error messages (catch RhinoException, extract lineNumber/columnNumber/getScriptStack)
+   - Rhino Swing debugger (Debug button in RequestPanel, attach Dim to ContextFactory, step/breakpoints/variable inspection)
+   - Execution delta after pre-script (show which env vars changed, final URL/headers/body vs initial)
