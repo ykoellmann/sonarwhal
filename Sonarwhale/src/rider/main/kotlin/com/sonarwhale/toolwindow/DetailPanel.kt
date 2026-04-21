@@ -86,6 +86,8 @@ class DetailPanel(private val project: Project) : JPanel(BorderLayout()) {
             cardLayout.show(cardPanel, "empty")
         } else {
             showHeader(endpoint)
+            requestPanel.setPreviewMode(true)
+            splitter.secondComponent = null
             requestPanel.showEndpoint(endpoint)
             responsePanel.clear()
             cardLayout.show(cardPanel, "content")
@@ -96,6 +98,8 @@ class DetailPanel(private val project: Project) : JPanel(BorderLayout()) {
     /** Called when a request sub-node is selected in the tree. */
     fun showRequest(endpoint: ApiEndpoint, request: SavedRequest) {
         showHeader(endpoint)
+        requestPanel.setPreviewMode(false)
+        splitter.secondComponent = responsePanel
         requestPanel.showRequest(endpoint, request)
         responsePanel.clear()
         cardLayout.show(cardPanel, "content")

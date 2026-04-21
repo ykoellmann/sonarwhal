@@ -69,6 +69,7 @@ class BodyPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private var binaryPath = ""
     private val binaryPathLabel = JBLabel("No file selected").apply { foreground = com.intellij.ui.JBColor.GRAY }
+    private lateinit var binaryChooseButton: JButton
 
     init {
         ButtonGroup().apply {
@@ -84,7 +85,7 @@ class BodyPanel(private val project: Project) : JPanel(BorderLayout()) {
         // Build binary card
         val binaryCard = JPanel(BorderLayout(8, 0)).apply {
             border = JBUI.Borders.empty(4, 0, 4, 0)
-            val btn = JButton(object : AbstractAction("Choose file…") {
+            binaryChooseButton = JButton(object : AbstractAction("Choose file…") {
                 override fun actionPerformed(e: ActionEvent) {
                     val fc = JFileChooser()
                     if (fc.showOpenDialog(this@BodyPanel) == JFileChooser.APPROVE_OPTION) {
@@ -94,7 +95,7 @@ class BodyPanel(private val project: Project) : JPanel(BorderLayout()) {
                     }
                 }
             })
-            add(btn, BorderLayout.WEST)
+            add(binaryChooseButton, BorderLayout.WEST)
             add(binaryPathLabel, BorderLayout.CENTER)
         }
 
@@ -195,6 +196,19 @@ class BodyPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     fun addChangeListener(l: () -> Unit) { changeListeners += l }
     private fun fireChangeListeners() = changeListeners.forEach { it() }
+
+    fun setReadOnly(v: Boolean) {
+        radioNone.isEnabled         = !v
+        radioForm.isEnabled         = !v
+        radioRaw.isEnabled          = !v
+        radioBinary.isEnabled       = !v
+        contentTypeCombo.isEnabled  = !v
+        jsonEditor.isEnabled        = !v
+        xmlEditor.isEnabled         = !v
+        textEditor.isEnabled        = !v
+        binaryChooseButton.isEnabled = !v
+        formPanel.setReadOnly(v)
+    }
 
     /** Returns the raw text for persistence (only meaningful in Raw mode). */
     fun getRawText(): String = currentEditor().text

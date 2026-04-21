@@ -38,6 +38,7 @@ import java.nio.file.Paths
 import java.time.Duration
 import java.util.UUID
 import javax.swing.JButton
+import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JTextField
 import javax.swing.SwingWorker
@@ -90,6 +91,8 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val paramsTable = ParamsTablePanel()
     private val headersTable = ParamsTablePanel()
     private val bodyPanel = BodyPanel(project)
+
+    private val actionButtons: List<JComponent> = listOf(sendButton, saveButton, setDefaultButton, preScriptButton, postScriptButton)
 
     private val tabs = JBTabbedPane()
 
@@ -229,6 +232,13 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (hasBody) tabs.selectedIndex = tabs.indexOfComponent(bodyPanel)
         updateComputedUrl()
         saveButton.isEnabled = true
+    }
+
+    fun setPreviewMode(preview: Boolean) {
+        actionButtons.forEach { it.isVisible = !preview }
+        paramsTable.setReadOnly(preview)
+        headersTable.setReadOnly(preview)
+        bodyPanel.setReadOnly(preview)
     }
 
     /** Trigger a send programmatically (used by gutter icon). */

@@ -31,8 +31,9 @@ class ParamsTablePanel : JPanel(BorderLayout()) {
         arrayOf<Array<Any>>(),
         arrayOf("", "Key", "Value", "Description")
     ) {
+        var readOnly = false
         override fun getColumnClass(col: Int) = if (col == 0) java.lang.Boolean::class.java else String::class.java
-        override fun isCellEditable(row: Int, col: Int) = col != 0
+        override fun isCellEditable(row: Int, col: Int) = !readOnly && col != 0
     }
 
     val table = JBTable(tableModel).apply {
@@ -50,6 +51,8 @@ class ParamsTablePanel : JPanel(BorderLayout()) {
 
     private val changeListeners = mutableListOf<() -> Unit>()
 
+    private val toolbar = buildToolbar()
+
     init {
         // Single-click checkbox toggle — JBTable's default editor requires a double-click,
         // so we handle the boolean column directly via mouseClicked.
@@ -58,6 +61,7 @@ class ParamsTablePanel : JPanel(BorderLayout()) {
                 val row = table.rowAtPoint(e.point)
                 val col = table.columnAtPoint(e.point)
                 if (col == 0 && row in 0 until tableModel.rowCount) {
+                    if (tableModel.readOnly) return
                     val current = tableModel.getValueAt(row, 0) as? Boolean ?: true
                     tableModel.setValueAt(!current, row, 0)
                 }
@@ -66,7 +70,6 @@ class ParamsTablePanel : JPanel(BorderLayout()) {
         val scrollPane = JBScrollPane(table)
         add(scrollPane, BorderLayout.CENTER)
 
-        val toolbar = buildToolbar()
         add(toolbar, BorderLayout.SOUTH)
 
         appendBlankRow()
@@ -139,4 +142,10 @@ class ParamsTablePanel : JPanel(BorderLayout()) {
     }
 
     private fun fireChangeListeners() = changeListeners.forEach { it() }
+
+    fun setReadOnly(v: Boolean) {
+        tableModel.readOnly = v
+        tableModel.fireTableDataChanged()
+        toolbar.isVisible = !v
+    }
 }
