@@ -57,6 +57,7 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     // Backing field for request name — edited via the header in DetailPanel
     private var currentRequestName: String = "Default"
+    private var previewMode = false
 
     private val setDefaultButton = JButton("★").apply {
         font = font.deriveFont(10f)
@@ -92,7 +93,7 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val headersTable = ParamsTablePanel()
     private val bodyPanel = BodyPanel(project)
 
-    private val actionButtons: List<JComponent> = listOf(sendButton, saveButton, setDefaultButton, preScriptButton, postScriptButton)
+    private val actionButtons: List<JComponent> = listOf(sendButton, saveButton, setDefaultButton)
 
     private val tabs = JBTabbedPane()
 
@@ -127,7 +128,7 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         add(tabs, BorderLayout.CENTER)
 
         sendButton.addActionListener { sendRequest() }
-        saveButton.addActionListener { saveRequest() }
+        saveButton.addActionListener { if (previewMode) createNewRequest() else saveRequest() }
         setDefaultButton.addActionListener { setAsDefault() }
         preScriptButton.addActionListener  { openOrCreateScript(ScriptPhase.PRE) }
         postScriptButton.addActionListener { openOrCreateScript(ScriptPhase.POST) }
@@ -235,7 +236,10 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     fun setPreviewMode(preview: Boolean) {
+        previewMode = preview
         actionButtons.forEach { it.isVisible = !preview }
+        saveButton.isVisible = true   // always visible — text changes based on mode
+        saveButton.text = if (preview) "New Request" else "Save"
         paramsTable.setReadOnly(preview)
         headersTable.setReadOnly(preview)
         bodyPanel.setReadOnly(preview)
@@ -356,6 +360,35 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         updateDefaultButtonState(true)
         onDefaultStateChanged?.invoke(true)
         onRequestSaved?.invoke()
+    }
+
+    private fun createNewRequest() {
+        val endpoint = currentEndpoint ?: return
+        val existingNames = stateService.getRequests(endpoint.id).map { it.name }.toSet()
+
+        var inputName: String? = null
+        while (inputName == null) {
+            val input = javax.swing.JOptionPane.showInputDialog(
+                this,
+                "Request name:",
+                "New Request",
+                javax.swing.JOptionPane.PLAIN_MESSAGE
+            )?.trim()
+            when {
+                input == null -> return
+                input.isEmpty() -> javax.swing.JOptionPane.showMessageDialog(
+                    this, "Name cannot be empty.", "Invalid Name", javax.swing.JOptionPane.WARNING_MESSAGE
+                )
+                input in existingNames -> javax.swing.JOptionPane.showMessageDialog(
+                    this, "A request named \"$input\" already exists for this endpoint.",
+                    "Duplicate Name", javax.swing.JOptionPane.WARNING_MESSAGE
+                )
+                else -> inputName = input
+            }
+        }
+
+        currentRequestName = inputName
+        saveRequest()
     }
 
     private fun saveRequest() {
