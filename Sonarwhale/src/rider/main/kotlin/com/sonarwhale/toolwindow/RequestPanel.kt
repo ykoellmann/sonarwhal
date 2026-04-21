@@ -493,12 +493,29 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
                 }
 
                 val start = System.currentTimeMillis()
-                val response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+                val response = try {
+                    client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+                } catch (e: Exception) {
+                    val duration = System.currentTimeMillis() - start
+                    consoleOutput.http(
+                        endpoint.method.name, finalUrl, 0, duration,
+                        finalHeaders, finalBody.ifEmpty { null }, emptyMap(), "", e.message
+                    )
+                    throw e
+                }
                 val duration = System.currentTimeMillis() - start
 
                 // ── Post-scripts ───────────────────────────────────────────────
                 val responseHeaders = response.headers().map()
                     .mapValues { (_, vs) -> vs.firstOrNull() ?: "" }
+
+                // Record main request between pre and post scripts (timeline order)
+                consoleOutput.http(
+                    endpoint.method.name, finalUrl, response.statusCode(), duration,
+                    finalHeaders, finalBody.ifEmpty { null },
+                    responseHeaders, response.body(), null
+                )
+
                 testResults = scriptService.executePostScripts(
                     endpoint        = endpoint,
                     request         = savedRequest,
@@ -522,6 +539,7 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
                 }.onFailure { e ->
                     onResponseReceived?.invoke(0, describeError(e), 0)
                     onTestResultsReceived?.invoke(emptyList())
+                    onConsoleReceived?.invoke(consoleOutput.entries)
                 }
             }
         }.execute()
