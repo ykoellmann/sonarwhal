@@ -6,6 +6,7 @@ import com.google.gson.reflect.TypeToken
 import com.intellij.openapi.components.*
 import com.intellij.openapi.project.Project
 import com.sonarwhale.model.EndpointConfig
+import com.sonarwhale.model.Environment
 import com.sonarwhale.model.GlobalConfig
 import com.sonarwhale.model.SavedRequest
 import com.sonarwhale.model.TagConfig
@@ -125,6 +126,26 @@ class SonarwhaleStateService(@Suppress("UNUSED_PARAMETER") project: Project) : P
     fun setEndpointConfig(config: EndpointConfig) {
         myState.endpointConfigs[config.endpointId] = gson.toJson(config)
     }
+
+    // ── Compatibility stubs (TODO: remove when Tasks 18/19/20 update callers) ─
+
+    /** @deprecated Use EnvironmentService. Stub retained for compile compatibility. */
+    fun getEnvironments(): List<Environment> = emptyList()
+
+    /** @deprecated Use EnvironmentService. Stub retained for compile compatibility. */
+    fun getActiveEnvironment(): Environment? = null
+
+    /** @deprecated Use EnvironmentService. Stub retained for compile compatibility. */
+    fun upsertEnvironment(@Suppress("UNUSED_PARAMETER") env: Environment) {}
+
+    /** @deprecated Use EnvironmentService. Stub retained for compile compatibility. */
+    fun removeEnvironment(@Suppress("UNUSED_PARAMETER") id: String) {}
+
+    /** @deprecated Use EnvironmentService. Stub retained for compile compatibility. */
+    fun setActiveEnvironment(@Suppress("UNUSED_PARAMETER") id: String) {}
+
+    /** @deprecated Use VariableResolver. Stub retained for compile compatibility. */
+    fun resolveVariables(text: String): String = text
 
     // ── Serialization ─────────────────────────────────────────────────────────
 
