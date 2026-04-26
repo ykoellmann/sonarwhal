@@ -118,6 +118,8 @@ class CollectionService(private val project: Project) : Disposable {
 
     private fun load() {
         collections.clear()
+
+        // Try loading new format first
         val loaded = runCatching {
             val arr = JsonParser.parseString(storageFile.readText()).asJsonArray
             arr.mapNotNull { jsonToCollection(it.asJsonObject) }
@@ -125,17 +127,69 @@ class CollectionService(private val project: Project) : Disposable {
 
         if (!loaded.isNullOrEmpty()) {
             collections += loaded
-        } else {
-            // Default: one collection "My API" with a dev environment
-            val devEnv = CollectionEnvironment(
-                name = "dev",
-                source = EnvironmentSource.ServerUrl(host = "http://localhost", port = 5000)
-            )
-            collections += ApiCollection(name = "My API", environments = listOf(devEnv),
-                activeEnvironmentId = devEnv.id)
-            save()
+            return
         }
+
+        // Attempt migration from old environments.json
+        val oldFile = File(project.basePath ?: "", ".idea/sonarwhale/environments.json")
+        if (oldFile.exists()) {
+            val migrated = migrateFromOldEnvironments(oldFile)
+            if (migrated.isNotEmpty()) {
+                collections += migrated
+                save()
+                oldFile.renameTo(File(oldFile.parent, "environments.json.migrated"))
+                return
+            }
+        }
+
+        // Fresh default
+        val devEnv = CollectionEnvironment(
+            name = "dev",
+            source = EnvironmentSource.ServerUrl(host = "http://localhost", port = 5000)
+        )
+        collections += ApiCollection(name = "My API", environments = listOf(devEnv),
+            activeEnvironmentId = devEnv.id)
+        save()
     }
+
+    private fun migrateFromOldEnvironments(file: File): List<ApiCollection> = runCatching {
+        // Old format: array of { id, name, isActive, source: { type, host, port, ... } }
+        val arr = JsonParser.parseString(file.readText()).asJsonArray
+        val envs = arr.mapNotNull { jsonToOldEnv(it.asJsonObject) }
+        if (envs.isEmpty()) return@runCatching emptyList()
+
+        // Each old environment becomes a CollectionEnvironment under one "My API" collection
+        val activeId = envs.firstOrNull { it.second }?.first?.id ?: envs.first().first.id
+        val collection = ApiCollection(
+            name = "My API",
+            environments = envs.map { it.first },
+            activeEnvironmentId = activeId
+        )
+        listOf(collection)
+    }.getOrDefault(emptyList())
+
+    // Returns Pair<CollectionEnvironment, isActive>
+    private fun jsonToOldEnv(obj: JsonObject): Pair<CollectionEnvironment, Boolean>? = runCatching {
+        val src = obj.getAsJsonObject("source")
+        val source: EnvironmentSource = when (src.get("type").asString) {
+            "serverUrl" -> EnvironmentSource.ServerUrl(
+                host = src.get("host").asString,
+                port = src.get("port").asInt,
+                openApiPath = src.get("openApiPath")?.asString
+            )
+            "filePath" -> EnvironmentSource.FilePath(path = src.get("path").asString)
+            "staticImport" -> EnvironmentSource.StaticImport(cachedContent = src.get("cachedContent").asString)
+            else -> return@runCatching null
+        }
+        Pair(
+            CollectionEnvironment(
+                id = obj.get("id").asString,
+                name = obj.get("name").asString,
+                source = source
+            ),
+            obj.get("isActive")?.asBoolean ?: false
+        )
+    }.getOrNull()
 
     private fun collectionToJson(col: ApiCollection): JsonObject {
         val obj = JsonObject()
