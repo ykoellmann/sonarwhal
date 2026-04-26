@@ -93,16 +93,18 @@ class SonarwhaleScriptService(private val project: Project) {
         level: ScriptLevel,
         tag: String? = null,
         endpoint: ApiEndpoint? = null,
-        request: SavedRequest? = null
+        request: SavedRequest? = null,
+        collectionId: String = ""
     ): Path {
         val fileName = if (phase == ScriptPhase.PRE) "pre.js" else "post.js"
         val root = scriptsRoot()
         return when (level) {
-            ScriptLevel.GLOBAL   -> root.resolve(fileName)
-            ScriptLevel.TAG      -> root.resolve(sanitize(tag)).resolve(fileName)
-            ScriptLevel.ENDPOINT -> root.resolve(sanitize(tag))
+            ScriptLevel.GLOBAL      -> root.resolve(fileName)
+            ScriptLevel.COLLECTION  -> root.resolve("collections").resolve(collectionId).resolve(fileName)
+            ScriptLevel.TAG         -> root.resolve(sanitize(tag)).resolve(fileName)
+            ScriptLevel.ENDPOINT    -> root.resolve(sanitize(tag))
                 .resolve(endpointDir(endpoint)).resolve(fileName)
-            ScriptLevel.REQUEST  -> root.resolve(sanitize(tag))
+            ScriptLevel.REQUEST     -> root.resolve(sanitize(tag))
                 .resolve(endpointDir(endpoint)).resolve(sanitize(request?.name ?: "Default")).resolve(fileName)
         }
     }
@@ -127,10 +129,11 @@ class SonarwhaleScriptService(private val project: Project) {
         ensureSwDts()
         if (!scriptPath.exists()) {
             val depth = when (level) {
-                ScriptLevel.GLOBAL   -> 0
-                ScriptLevel.TAG      -> 1
-                ScriptLevel.ENDPOINT -> 2
-                ScriptLevel.REQUEST  -> 3
+                ScriptLevel.GLOBAL      -> 0
+                ScriptLevel.COLLECTION  -> 2
+                ScriptLevel.TAG         -> 1
+                ScriptLevel.ENDPOINT    -> 2
+                ScriptLevel.REQUEST     -> 3
             }
             val refPath = "../".repeat(depth) + "sw.d.ts"
             val header = "/// <reference path=\"$refPath\" />\n"

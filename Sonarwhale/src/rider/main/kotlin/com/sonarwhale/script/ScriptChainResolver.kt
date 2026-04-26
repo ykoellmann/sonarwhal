@@ -8,25 +8,26 @@ import kotlin.io.path.isRegularFile
  * Resolves the ordered list of pre/post script files for a given endpoint + request.
  * Scripts live in a directory hierarchy rooted at [scriptsRoot].
  *
- * Pre-chain: global → tag → endpoint → request
- * Post-chain: request → endpoint → tag → global  (reversed)
+ * Pre-chain: global → collection → tag → endpoint → request
+ * Post-chain: request → endpoint → tag → collection → global  (reversed)
  *
  * inherit.off at any level stops all parent levels from being included.
  */
 class ScriptChainResolver(private val scriptsRoot: Path) {
 
-    fun resolvePreChain(tag: String, method: String, path: String, requestName: String): List<ScriptFile> =
-        buildChain(tag, method, path, requestName, ScriptPhase.PRE)
+    fun resolvePreChain(tag: String, method: String, path: String, requestName: String, collectionId: String = ""): List<ScriptFile> =
+        buildChain(tag, method, path, requestName, ScriptPhase.PRE, collectionId)
 
-    fun resolvePostChain(tag: String, method: String, path: String, requestName: String): List<ScriptFile> =
-        buildChain(tag, method, path, requestName, ScriptPhase.POST).reversed()
+    fun resolvePostChain(tag: String, method: String, path: String, requestName: String, collectionId: String = ""): List<ScriptFile> =
+        buildChain(tag, method, path, requestName, ScriptPhase.POST, collectionId).reversed()
 
     private fun buildChain(
         tag: String,
         method: String,
         path: String,
         requestName: String,
-        phase: ScriptPhase
+        phase: ScriptPhase,
+        collectionId: String = ""
     ): List<ScriptFile> {
         if (!scriptsRoot.exists()) return emptyList()
 
@@ -37,12 +38,15 @@ class ScriptChainResolver(private val scriptsRoot: Path) {
 
         data class Level(val dir: Path, val level: ScriptLevel)
 
-        val levels = listOf(
-            Level(scriptsRoot, ScriptLevel.GLOBAL),
-            Level(scriptsRoot.resolve(tagDirName), ScriptLevel.TAG),
-            Level(scriptsRoot.resolve(tagDirName).resolve(endpointDirName), ScriptLevel.ENDPOINT),
-            Level(scriptsRoot.resolve(tagDirName).resolve(endpointDirName).resolve(requestDirName), ScriptLevel.REQUEST)
-        )
+        val levels = buildList {
+            add(Level(scriptsRoot, ScriptLevel.GLOBAL))
+            if (collectionId.isNotBlank()) {
+                add(Level(scriptsRoot.resolve("collections").resolve(collectionId), ScriptLevel.COLLECTION))
+            }
+            add(Level(scriptsRoot.resolve(tagDirName), ScriptLevel.TAG))
+            add(Level(scriptsRoot.resolve(tagDirName).resolve(endpointDirName), ScriptLevel.ENDPOINT))
+            add(Level(scriptsRoot.resolve(tagDirName).resolve(endpointDirName).resolve(requestDirName), ScriptLevel.REQUEST))
+        }
 
         // Deepest inherit.off wins (more specific level takes precedence over broader parent).
         // E.g. inherit.off at ENDPOINT level excludes GLOBAL+TAG even if TAG also has inherit.off.
