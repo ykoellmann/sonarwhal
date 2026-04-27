@@ -12,8 +12,8 @@ import com.intellij.util.ui.JBUI
 import com.sonarwhale.SonarwhaleStateService
 import com.sonarwhale.model.ApiEndpoint
 import com.sonarwhale.model.ApiParameter
-import com.sonarwhale.model.ApiSchema
-import com.sonarwhale.model.AuthType
+import com.sonarwhale.model.AuthConfig
+import com.sonarwhale.model.AuthMode
 import com.sonarwhale.model.toJsonTemplate
 import com.sonarwhale.model.ParameterLocation
 import com.sonarwhale.model.SavedRequest
@@ -22,6 +22,10 @@ import com.sonarwhale.script.ScriptLevel
 import com.sonarwhale.script.ScriptPhase
 import com.sonarwhale.script.SonarwhaleScriptService
 import com.sonarwhale.script.TestResult
+import com.sonarwhale.service.AuthResolver
+import com.sonarwhale.service.CollectionService
+import com.sonarwhale.service.RouteIndexService
+import com.sonarwhale.service.VariableResolver
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Font
@@ -87,6 +91,13 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         toolTipText = "Save current headers, body & param values"
     }
 
+    // Auth state
+    private var currentAuthConfig: AuthConfig = AuthConfig()
+    private val authConfigPanel = AuthConfigPanel(
+        auth = currentAuthConfig,
+        onChange = { updated -> currentAuthConfig = updated; autoSave() }
+    )
+
     // Tab panels
     private val paramsTable = ParamsTablePanel()
     private val headersTable = ParamsTablePanel()
@@ -122,6 +133,7 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         tabs.addTab("Params", paramsTable)
         tabs.addTab("Headers", headersTable)
         tabs.addTab("Body", bodyPanel)
+        tabs.addTab("Auth", authConfigPanel)
 
         add(buildTopBar(), BorderLayout.NORTH)
         add(tabs, BorderLayout.CENTER)
@@ -181,9 +193,18 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         // Params
         paramsTable.setRows(buildParamRows(endpoint, request.paramValues, request.paramEnabled))
 
-        // Headers
-        val headerRows = deserializeRows(request.headers) ?: buildHeadersTemplate(endpoint)
+        // Headers (auth pre-fill removed — handled by Auth tab)
+        val headerRows = deserializeRows(request.headers) ?: endpoint.parameters
+            .filter { it.location == ParameterLocation.HEADER }
+            .map { NameValueRow(true, it.name, "", "header param") }
         headersTable.setRows(headerRows)
+
+        // Auth tab
+        currentAuthConfig = request.config.auth
+        authConfigPanel.setAuth(
+            newAuth = request.config.auth,
+            newInherited = resolveInheritedAuthMode(endpoint)
+        )
 
         // Body
         if (hasBody) {
@@ -221,7 +242,17 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         val hasBody   = endpoint.requestBody != null
 
         paramsTable.setRows(buildParamRows(endpoint, emptyMap()))
-        headersTable.setRows(buildHeadersTemplate(endpoint))
+        headersTable.setRows(endpoint.parameters
+            .filter { it.location == ParameterLocation.HEADER }
+            .map { NameValueRow(true, it.name, "", "header param") })
+
+        // Auth tab
+        val endpointConfig = stateService.getEndpointConfig(endpoint.id)
+        currentAuthConfig = endpointConfig.config.auth
+        authConfigPanel.setAuth(
+            newAuth = endpointConfig.config.auth,
+            newInherited = resolveInheritedAuthMode(endpoint)
+        )
 
         if (hasBody) {
             bodyPanel.setContent(BodyContent.Raw(buildBodyTemplate(endpoint), "application/json"))
@@ -284,27 +315,21 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         return parts.joinToString(", ")
     }
 
-    private fun buildHeadersTemplate(endpoint: ApiEndpoint): List<NameValueRow> {
-        val rows = mutableListOf<NameValueRow>()
-        endpoint.auth?.let { auth ->
-            if (auth.type != AuthType.NONE) {
-                val value = when (auth.type) {
-                    AuthType.BEARER  -> "Bearer <token>"
-                    AuthType.BASIC   -> "Basic <base64>"
-                    AuthType.API_KEY -> "<key>"
-                    else             -> "<token>"
-                }
-                rows += NameValueRow(true, "Authorization", value, "auth")
-            }
-        }
-        endpoint.parameters.filter { it.location == ParameterLocation.HEADER }.forEach { param ->
-            rows += NameValueRow(true, param.name, "", "header param")
-        }
-        return rows
-    }
-
     private fun buildBodyTemplate(endpoint: ApiEndpoint): String {
         return endpoint.requestBody?.toJsonTemplate() ?: "{}"
+    }
+
+    private fun resolveInheritedAuthMode(endpoint: ApiEndpoint): AuthMode {
+        val colId = RouteIndexService.getInstance(project).getCollectionId(endpoint.id) ?: return AuthMode.NONE
+        val state = SonarwhaleStateService.getInstance(project)
+        val authResolver = AuthResolver.getInstance(project)
+        return authResolver.resolve(
+            requestAuth = AuthConfig(mode = AuthMode.INHERIT),
+            endpointAuth = state.getEndpointConfig(endpoint.id).config.auth,
+            tagAuth = endpoint.tags.firstOrNull()?.let { state.getTagConfig(it).config.auth } ?: AuthConfig(),
+            collectionAuth = CollectionService.getInstance(project).getById(colId)?.config?.auth ?: AuthConfig(),
+            globalAuth = state.getGlobalConfig().config.auth
+        ).mode
     }
 
     private fun updateComputedUrl() {
@@ -329,7 +354,12 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
 
         val assembled = base + route + if (query.isEmpty()) "" else "?" + query.joinToString("&")
-        val resolved = stateService.resolveVariables(assembled)
+        val resolved = currentEndpoint?.let { ep ->
+            val varResolver = VariableResolver.getInstance(project)
+            val colId = RouteIndexService.getInstance(project).getCollectionId(ep.id) ?: ""
+            val varMap = varResolver.buildMap(colId, ep.id, currentRequest?.id)
+            varResolver.resolve(assembled, varMap)
+        } ?: assembled
         computedUrlField.text = resolved
         computedUrlField.foreground = if (resolved.contains("{{"))
             JBColor(java.awt.Color(0xCC, 0x33, 0x00), java.awt.Color(0xFF, 0x66, 0x44))
@@ -390,6 +420,18 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         saveRequest()
     }
 
+    private fun autoSave() {
+        if (previewMode) {
+            // In preview mode (no saved request loaded), save auth to EndpointConfig
+            val ep = currentEndpoint ?: return
+            val existing = stateService.getEndpointConfig(ep.id)
+            stateService.setEndpointConfig(existing.copy(config = existing.config.copy(auth = currentAuthConfig)))
+        } else {
+            // In request mode, save to the saved request
+            if (currentRequest != null) saveRequest()
+        }
+    }
+
     private fun saveRequest() {
         val endpoint = currentEndpoint ?: return
 
@@ -416,7 +458,8 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
                 else -> ""
             },
             paramValues = paramValues,
-            paramEnabled = paramEnabled
+            paramEnabled = paramEnabled,
+            config = (currentRequest?.config ?: com.sonarwhale.model.HierarchyConfig()).copy(auth = currentAuthConfig)
         )
 
         currentRequest = req
@@ -433,13 +476,25 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
         saveRequest()
         sendButton.isEnabled = false
 
+        val colId = RouteIndexService.getInstance(project).getCollectionId(endpoint.id) ?: ""
+        val varResolver = VariableResolver.getInstance(project)
+        val authResolver = AuthResolver.getInstance(project)
+        val varMap = varResolver.buildMap(colId, endpoint.id, currentRequest?.id)
+
+        // Resolve URL; auth will be applied inside doInBackground on the actual builder
+        val resolvedUrlBuilder = StringBuilder(varResolver.resolve(rawUrl, varMap))
+        val effectiveAuth = authResolver.resolve(colId, endpoint.id, currentRequest?.id)
+        // Apply auth now so query-param API keys are appended to the URL before use
+        authResolver.applyToRequest(HttpRequest.newBuilder(), resolvedUrlBuilder, effectiveAuth, varMap, varResolver)
+        val resolvedUrl = resolvedUrlBuilder.toString()
+
         val headerRows = headersTable.getRows()
             .filter { it.enabled && it.key.isNotEmpty() }
-            .map { it.copy(value = stateService.resolveVariables(it.value)) }
+            .map { it.copy(value = varResolver.resolve(it.value, varMap)) }
         val bodyContent = bodyPanel.getContent().let { bc ->
             when (bc) {
-                is BodyContent.Raw      -> bc.copy(text = stateService.resolveVariables(bc.text))
-                is BodyContent.FormData -> bc.copy(rows = bc.rows.map { r -> r.copy(value = stateService.resolveVariables(r.value)) })
+                is BodyContent.Raw      -> bc.copy(text = varResolver.resolve(bc.text, varMap))
+                is BodyContent.FormData -> bc.copy(rows = bc.rows.map { r -> r.copy(value = varResolver.resolve(r.value, varMap)) })
                 else -> bc
             }
         }
@@ -462,7 +517,7 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
                 val ctx = scriptService.executePreScripts(
                     endpoint = endpoint,
                     request  = savedRequest,
-                    url      = rawUrl,
+                    url      = resolvedUrl,
                     headers  = initialHeaders,
                     body     = initialBody,
                     console  = consoleOutput
@@ -479,6 +534,10 @@ class RequestPanel(private val project: Project) : JPanel(BorderLayout()) {
                     .uri(URI.create(finalUrl))
                     .timeout(Duration.ofSeconds(30))
 
+                // Apply auth headers (header-based modes; query-param already in resolvedUrl)
+                val authUrlForBuilder = StringBuilder(finalUrl)
+                authResolver.applyToRequest(builder, authUrlForBuilder, effectiveAuth, varMap, varResolver)
+                // Apply non-auth headers from script context
                 finalHeaders.forEach { (k, v) -> runCatching { builder.header(k, v) } }
                 val hasContentType = finalHeaders.keys.any { it.equals("content-type", ignoreCase = true) }
 
