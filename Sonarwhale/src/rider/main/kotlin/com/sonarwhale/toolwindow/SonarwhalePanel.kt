@@ -6,22 +6,14 @@ import com.intellij.openapi.actionSystem.ActionToolbar
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
-import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
-import com.intellij.ui.JBColor
-import com.sonarwhale.settings.SonarwhaleConfigurable
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.SearchTextField
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.sonarwhale.model.ApiEndpoint
 import com.sonarwhale.SonarwhaleStateService
-import com.sonarwhale.service.CollectionService
 import com.sonarwhale.service.RouteIndexService
 import java.awt.BorderLayout
-import java.awt.FlowLayout
-import javax.swing.JButton
-import javax.swing.JComboBox
 import javax.swing.JPanel
 import javax.swing.JProgressBar
 import javax.swing.event.DocumentEvent
@@ -37,9 +29,6 @@ class SonarwhalePanel(private val project: Project) : JPanel(BorderLayout()) {
         it.isVisible = false
     }
 
-    private val envCombo = JComboBox<String>()
-    private var suppressEnvComboListener = false
-
     private var allEndpoints: List<ApiEndpoint> = emptyList()
 
     init {
@@ -50,9 +39,6 @@ class SonarwhalePanel(private val project: Project) : JPanel(BorderLayout()) {
         val topBar = JPanel(BorderLayout(4, 0))
         topBar.add(toolbar.component, BorderLayout.WEST)
         topBar.add(searchField, BorderLayout.CENTER)
-        topBar.add(buildEnvPanel(), BorderLayout.EAST)
-
-        refreshEnvCombo()
 
         val leftPanel = JPanel(BorderLayout())
         leftPanel.add(topBar, BorderLayout.NORTH)
@@ -124,59 +110,6 @@ class SonarwhalePanel(private val project: Project) : JPanel(BorderLayout()) {
         service.addListener { endpoints ->
             allEndpoints = endpoints
             applyFilter()
-        }
-    }
-
-    private fun buildEnvPanel(): JPanel {
-        val collectionService = CollectionService.getInstance(project)
-
-        envCombo.addActionListener {
-            if (suppressEnvComboListener) return@addActionListener
-            val idx = envCombo.selectedIndex
-            val col = collectionService.getAll().firstOrNull() ?: return@addActionListener
-            val selected = col.environments.getOrNull(idx)
-            if (selected != null) {
-                collectionService.setActiveEnvironment(col.id, selected.id)
-                RouteIndexService.getInstance(project).refresh()
-                detailPanel.requestPanel.refreshEnvironment()
-            }
-        }
-
-        val editButton = JButton(AllIcons.General.Settings).apply {
-            isBorderPainted = false
-            isContentAreaFilled = false
-            toolTipText = "Manage sources & environments"
-            addActionListener {
-                ShowSettingsUtil.getInstance().showSettingsDialog(project, SonarwhaleConfigurable::class.java)
-                refreshEnvCombo()
-                RouteIndexService.getInstance(project).refresh()
-                detailPanel.requestPanel.refreshEnvironment()
-            }
-        }
-
-        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
-        panel.add(JBLabel("Env:").apply { foreground = JBColor.GRAY; font = font.deriveFont(10f) })
-        panel.add(envCombo)
-        panel.add(editButton)
-        return panel
-    }
-
-    private fun refreshEnvCombo() {
-        suppressEnvComboListener = true
-        try {
-            val collectionService = CollectionService.getInstance(project)
-            val col = collectionService.getAll().firstOrNull()
-            val envs = col?.environments ?: emptyList()
-            val activeId = col?.activeEnvironmentId
-
-            envCombo.removeAllItems()
-            envs.forEach { envCombo.addItem(it.name) }
-            if (envs.isEmpty()) envCombo.addItem("No source configured")
-
-            val activeIdx = if (activeId != null) envs.indexOfFirst { it.id == activeId } else 0
-            envCombo.selectedIndex = activeIdx.coerceIn(0, (envCombo.itemCount - 1).coerceAtLeast(0))
-        } finally {
-            suppressEnvComboListener = false
         }
     }
 
